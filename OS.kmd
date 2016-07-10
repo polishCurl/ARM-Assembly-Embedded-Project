@@ -1,0 +1,2703 @@
+KMD
+00000000:             ; ;---------------------------------------------------------------------------------------
+00000000:             ; ; Operating system (Supervisor) code  
+00000000:             ; ; Krzysztof Koch
+00000000:             ; ; 2nd Mar 2016
+00000000:             ; ;
+00000000:             ; ; Last edit: 6th May 2016
+00000000:             ; ; 
+00000000:             ; ; The Operating System implemented does the following:
+00000000:             ; ; 1. Allocate memory for Supervisor, Interrupt and User mode stacks
+00000000:             ; ; 2. Create exception vector table (reset, SVC and IRQ)
+00000000:             ; ; 3. Reset the LCD screen (clear it, move cursor home and make cursor go right without shift)
+00000000:             ; ; 4. Create the SVC and IRQ handlers.
+00000000:             ; ; 5. Implements system timer that measures time in 100ms since system initialisation [timestamp
+                      ; Adr]
+00000000:             ; ; 6. Scan external keyboard and two button on the board on every timer interrupt (1ms)
+00000000:             ; ; 7. Jump to selected user program after system initialisation 
+00000000:             ; ; 
+00000000:             ; ; Implemented Supervisor Calls:
+00000000:             ; ; 1. switch between user programs
+00000000:             ; ; 2. printing a character to LCD screen
+00000000:             ; ; 3. polling the timer 
+00000000:             ; ; 4. polling the buttons on the board
+00000000:             ; ; 5. polling the external keyboard
+00000000:             ; ; 6. get random unsigned 32-bit number
+00000000:             ; ; 7. switch specified LED on/off
+00000000:             ; ; 8. store the state of LEDs so that they are not affected by printing on LCD
+00000000:             ; ; 9. restore the LEDs state
+00000000:             ; ; 10. write to buzzer
+00000000:             ; ;
+00000000:             ; ; Implemented Interrupt Routines:
+00000000:             ; ; 1. Timer interrupt - every millisecond, scan the keyboards and buttons on the board, 
+00000000:             ; ;    generate a new random number and update the timer 
+00000000:             ; ; 
+00000000:             ; ; (Tab size - 4)
+00000000:             ; ;----------------------------------------------------------------------------------
+00000000:             ; 
+00000000:             ; 
+00000000:             ; ; ----------------------------INITIALISE EXCEPTION VECTORS-------------------------
+00000000:             ;                                 ORG     0x0000_0000
+00000000: EA000072    ;                                 B               reset                                   ; 00000
+                      ; 000 - Reset
+00000004: EAFFFFFE    ;                                 B               .                                              
+                      ; ; 00000004 - Undefined instruction      
+00000008: EA000088    ;                                 B               supervisor                              ; 00000
+                      ; 008 - SVC 
+0000000C: EAFFFFFE    ;                                 B               .                                              
+                      ; ; 0000000C - Prefetch abort
+00000010: EAFFFFFE    ;                                 B               .                                              
+                      ; ; 00000010 - Data abort 
+00000014: E1A00000    ;                                 NOP
+00000018: EA000089    ;                                 B               interrupt                               ; 00000
+                      ; 018 - IRQ       
+0000001C: EAFFFFFE    ;                                 B               .                                              
+                      ; ; 0000001C - FIQ        
+00000020:             ; 
+00000020:             ; 
+00000020:             ; 
+00000020:             ; ; ---------------------INITIALISE STACK POINTERS AND ALLOCATE STACK---------------
+00000020: 00 00 00 00 ;                                 DEFS    128, 0                                  ; allocate memo
+00000024: 00 00 00 00 ; ry for Supervisor mode stack
+00000028: 00 00 00 00 ; 
+0000002C: 00 00 00 00 ; 
+00000030: 00 00 00 00 ; 
+00000034: 00 00 00 00 ; 
+00000038: 00 00 00 00 ; 
+0000003C: 00 00 00 00 ; 
+00000040: 00 00 00 00 ; 
+00000044: 00 00 00 00 ; 
+00000048: 00 00 00 00 ; 
+0000004C: 00 00 00 00 ; 
+00000050: 00 00 00 00 ; 
+00000054: 00 00 00 00 ; 
+00000058: 00 00 00 00 ; 
+0000005C: 00 00 00 00 ; 
+00000060: 00 00 00 00 ; 
+00000064: 00 00 00 00 ; 
+00000068: 00 00 00 00 ; 
+0000006C: 00 00 00 00 ; 
+00000070: 00 00 00 00 ; 
+00000074: 00 00 00 00 ; 
+00000078: 00 00 00 00 ; 
+0000007C: 00 00 00 00 ; 
+00000080: 00 00 00 00 ; 
+00000084: 00 00 00 00 ; 
+00000088: 00 00 00 00 ; 
+0000008C: 00 00 00 00 ; 
+00000090: 00 00 00 00 ; 
+00000094: 00 00 00 00 ; 
+00000098: 00 00 00 00 ; 
+0000009C: 00 00 00 00 ; 
+000000A0:             ; superStack                                                                              ; super
+                      ; visor stack pointer
+000000A0:             ;                                 ALIGN
+000000A0: 00 00 00 00 ;                                 DEFS    128, 0                                  ; allocate memo
+000000A4: 00 00 00 00 ; ry for IRQ stack
+000000A8: 00 00 00 00 ; 
+000000AC: 00 00 00 00 ; 
+000000B0: 00 00 00 00 ; 
+000000B4: 00 00 00 00 ; 
+000000B8: 00 00 00 00 ; 
+000000BC: 00 00 00 00 ; 
+000000C0: 00 00 00 00 ; 
+000000C4: 00 00 00 00 ; 
+000000C8: 00 00 00 00 ; 
+000000CC: 00 00 00 00 ; 
+000000D0: 00 00 00 00 ; 
+000000D4: 00 00 00 00 ; 
+000000D8: 00 00 00 00 ; 
+000000DC: 00 00 00 00 ; 
+000000E0: 00 00 00 00 ; 
+000000E4: 00 00 00 00 ; 
+000000E8: 00 00 00 00 ; 
+000000EC: 00 00 00 00 ; 
+000000F0: 00 00 00 00 ; 
+000000F4: 00 00 00 00 ; 
+000000F8: 00 00 00 00 ; 
+000000FC: 00 00 00 00 ; 
+00000100: 00 00 00 00 ; 
+00000104: 00 00 00 00 ; 
+00000108: 00 00 00 00 ; 
+0000010C: 00 00 00 00 ; 
+00000110: 00 00 00 00 ; 
+00000114: 00 00 00 00 ; 
+00000118: 00 00 00 00 ; 
+0000011C: 00 00 00 00 ; 
+00000120:             ; irqStack                                                                                ; user 
+                      ; stack pointer
+00000120:             ;                                 ALIGN
+00000120: 00 00 00 00 ;                                 DEFS    128, 0                                  ; allocate memo
+00000124: 00 00 00 00 ; ry for User Mode stack
+00000128: 00 00 00 00 ; 
+0000012C: 00 00 00 00 ; 
+00000130: 00 00 00 00 ; 
+00000134: 00 00 00 00 ; 
+00000138: 00 00 00 00 ; 
+0000013C: 00 00 00 00 ; 
+00000140: 00 00 00 00 ; 
+00000144: 00 00 00 00 ; 
+00000148: 00 00 00 00 ; 
+0000014C: 00 00 00 00 ; 
+00000150: 00 00 00 00 ; 
+00000154: 00 00 00 00 ; 
+00000158: 00 00 00 00 ; 
+0000015C: 00 00 00 00 ; 
+00000160: 00 00 00 00 ; 
+00000164: 00 00 00 00 ; 
+00000168: 00 00 00 00 ; 
+0000016C: 00 00 00 00 ; 
+00000170: 00 00 00 00 ; 
+00000174: 00 00 00 00 ; 
+00000178: 00 00 00 00 ; 
+0000017C: 00 00 00 00 ; 
+00000180: 00 00 00 00 ; 
+00000184: 00 00 00 00 ; 
+00000188: 00 00 00 00 ; 
+0000018C: 00 00 00 00 ; 
+00000190: 00 00 00 00 ; 
+00000194: 00 00 00 00 ; 
+00000198: 00 00 00 00 ; 
+0000019C: 00 00 00 00 ; 
+000001A0:             ; userStack                                                                               ; user 
+                      ; stack pointer
+000001A0:             ;                                 ALIGN
+000001A0:             ; 
+000001A0:             ; 
+000001A0:             ; 
+000001A0:             ; ; -----------------------------------SVC CALLS-----------------------------------
+000001A0: 000001E4    ; SVCtable                DEFW    switchProgram                   ; finish user program execution
+                      ; , return to OS
+000001A4: 00000530    ;                                 DEFW    printChar                       ; print Character [LCD.
+                      ; s]
+000001A8: 00000628    ;                                 DEFW    timestampPOLL                   ; poll timer [timer.s]
+000001AC: 00000484    ;                                 DEFW    buttonsPOLL                     ; poll the buttons on b
+                      ; oard [keyboardAndButtons.s]
+000001B0: 00000448    ;                                 DEFW    keyboardPOLL                    ; poll the external key
+                      ; board [keyboardAndButtons.s]
+000001B4: 0000072C    ;                                 DEFW    getRandom                               ; return a rand
+                      ; om 32-bit unsigned number [random.s]
+000001B8: 0000090C    ;                                 DEFW    switchLED                               ; turn specifie
+                      ; d LED on/off [LED.s]
+000001BC: 0000089C    ;                                 DEFW    storeLEDs                               ; save the stat
+                      ; e of LEDs in another mem location [LED.s]
+000001C0: 000008D4    ;                                 DEFW    restoreLEDs                     ; load the state of LED
+                      ; s from another mem location [LED.s]
+000001C4: 000009F0    ;                                 DEFW    buzzerWrite                     ; write to buzzer [buzz
+                      ; er.s]
+000001C8:             ; 
+000001C8:             ; 
+000001C8:             ; 
+000001C8:             ; ; -----------------------------PROCESS CONTROL BLOCK------------------------------
+000001C8: 00000A70    ; pcb                     DEFW    calculator                              ; calculator user progr
+                      ; am [calculator.s]
+000001CC: 00000C98    ;                                 DEFW    pwmTest                                 ; Pulse-width m
+                      ; odulation tester program [PWMtest.s]
+000001D0:             ; 
+000001D0:             ; 
+000001D0:             ; 
+000001D0:             ; ; -----------------------------SYSTEM INITIALISATION-------------------------------
+000001D0:             ; ; Set up interrupts, and the keyboard. Then jump to code that thas inter-program setup
+000001D0:             ; ; methods
+000001D0:             ; 
+000001D0: E24FDF4E    ; reset                   ADR     SP, superStack                  ; load supervisor stack pointer
+000001D4: EB00002A    ;                                 BL              IRQsSetup                               ; set u
+                      ; p interrupts
+000001D8: EB00005A    ;                                 BL              keyboardSetup                   ; set up the ke
+                      ; yboard [keyboardAndButtons.s]
+000001DC: EA000000    ;                                 B               switchProgram                   ; pick a user p
+                      ; rogram to run
+000001E0:             ; 
+000001E0:             ; 
+000001E0:             ; 
+000001E0:             ; ; --------------------------------SYSTEM TERMINATION-------------------------------
+000001E0: EAFFFFFE    ; terminate               B               terminate                               ; terminate sys
+                      ; tem
+000001E4:             ; 
+000001E4:             ; 
+000001E4:             ; 
+000001E4:             ; ; ----------------------------------PROGRAM SWITCH---------------------------------
+000001E4:             ; ; Procedure for switching from one user program to another. Sets up the LCD screen and LEDs
+000001E4:             ; ; as these have to be intitialised whenever a new program is run. Then it picks up the next
+000001E4:             ; ; program from the PCB table. Then switches back to user mode with interrupts re-enabled
+000001E4:             ; ; Register use:
+000001E4:             ; ;       R4 - pointer to the memory location with index of next program to run / pointer to PCB
+000001E4:             ; ;       R5 - index of next program to run / also used to change mode to USR
+000001E4:             ; ;       R6 - used for calculating the index of next program to run
+000001E4:             ; 
+000001E4: EB0000C5    ; switchProgram   BL              LCDSetup                                ; set up the LCD screen
+                      ;  [LCDscreen.s]
+000001E8: EB0001A2    ;                                 BL              setupLEDs                               ; set u
+                      ; p LEDs on board [LED.s]
+000001EC: E28F40C8    ;                                 ADR     R4, programRunning
+000001F0: E5145000    ;                                 LDR     R5, [R4]                                ; get the next 
+                      ; program to run
+000001F4: E2856001    ;                                 ADD     R6, R5, #1
+000001F8: E3560002    ;                                 CMP     R6, #noOfUsrPrograms    ; recompute the index of progra
+                      ; m to follow
+000001FC: 03A06000    ;                                 MOVEQ   R6, #0
+00000200: E5046000    ;                                 STR     R6, [R4]
+00000204: E24F4044    ;                                 ADR     R4, pcb                                 ; load the addr
+                      ; es of PCB
+00000208:             ; 
+00000208: E10F6000    ;                                 MRS     R6, CPSR                                ; switch to use
+                      ; r mode
+0000020C: E3C6601F    ;                                 BIC     R6, R6, #clearMode      
+00000210: E3866010    ;                                 ORR     R6, R6, #userMode       
+00000214: E3C66080    ;                                 BIC     R6, R6, #enableIRQinCPU ; enable interrupts in CPU
+00000218: E12FF006    ;                                 MSR     CPSR, R6                                ; update CPSR
+0000021C: E24FD084    ;                                 ADR     SP, userStack                   ; reset user mode SP ba
+                      ; ck to the bottom of stack
+00000220: E3A00028    ;                                 MOV     R0, #switchBeepLen              ; notify the user about
+                      ;  the change of program
+00000224: E3A01004    ;                                 MOV     R1, #switchBeepNo               ; to be executed with a
+                      ;  few beeps
+00000228: EB000205    ;                                 BL              beepBeep
+0000022C: E794F105    ;                                 LDR     PC, [R4, R5, LSL #2]    ; load the next program to run
+00000230:             ; 
+00000230:             ; 
+00000230:             ; 
+00000230:             ; ; --------------------------------TRAP ROUTINE FOR SVCs----------------------------
+00000230:             ; ; Identify the SVC call and then run the right handler
+00000230:             ; ; arguments:    
+00000230:             ; ;       R0 - SVC number
+00000230:             ; ; local regs:   
+00000230:             ; ;       R4 - pointer to the SVC jump table
+00000230:             ; 
+00000230: E350000A    ; supervisor              CMP     R0, #MaxSVC                             ; check the SVC call nu
+                      ; mber upper limit 
+00000234: 2AFFFFE9    ;                                 BHS     terminate                               ; terminate if 
+                      ; reached
+00000238: E92D0010    ;                                 PUSH    {R4}                                    ; store reg use
+                      ; d later used as pointer to SVC table
+0000023C: E24F40A4    ;                                 ADR     R4, SVCtable                    ; load SVC table pointe
+                      ; r
+00000240: E794F100    ;                                 LDR     PC, [R4, R0, LSL #2]    ; calculate SVC table address
+00000244:             ; 
+00000244:             ; 
+00000244:             ; 
+00000244:             ; ; --------------------------------TRAP ROUTINE FOR IRQs----------------------------
+00000244:             ; ; Recognise the interrupt source and then handle it
+00000244:             ; ; local registers:      
+00000244:             ; ;       R4 - pointer to the base of I/O address space
+00000244:             ; ;       R5 - bitmask representing the interrupt source
+00000244:             ; ;       R6 - result of identification test for interrupt source                 
+00000244:             ; 
+00000244: E92D4070    ; interrupt               PUSH    {R4-R6, LR}                             ; preserve the state
+00000248: E3A04201    ;                                 MOV     R4, #IOspace                    ; load the Interrupt so
+                      ; urces
+0000024C: E5945018    ;                                 LDR     R5, [R4, #IRQsAdr]              
+00000250:             ; 
+00000250: E2156001    ;                                 ANDS    R6, R5, #timerIRQVec    ; check if timer Interrupt. If 
+                      ; so, service it
+00000254: 1B000001    ;                                 BLNE    timerIRQ                                
+00000258:             ; 
+00000258: E8BD4070    ;                                 POP     {R4-R6, LR}                     ; restore the register 
+                      ; values
+0000025C: E25EF004    ;                                 SUBS    PC, LR, #4                              ; exit the Inte
+                      ; rrupt (Decrement the LR first)
+00000260:             ; 
+00000260:             ; 
+00000260:             ; 
+00000260:             ; ; ---------------------------------TIMER IRQ ROUTINE-------------------------------
+00000260:             ; ; Updates the timestamp and scans the keyboard to update key states
+00000260:             ; ; arguments:    
+00000260:             ; ;       R4 - pointer to Interrutp sources memory location
+00000260:             ; ;       R5 - interrupt source (timer)
+00000260:             ; 
+00000260: E92D4030    ; timerIRQ                PUSH    {R4-R5, LR}     
+00000264: E5945018    ;                                 LDR     R5, [R4, #IRQsAdr]              
+00000268: E3C55001    ;                                 BIC     R5, R5, #timerIRQVec    ; clear the interrupt so it is 
+                      ; serviced once
+0000026C: E5C45018    ;                                 STRB    R5, [R4, #IRQsAdr]      
+00000270: EB0000F5    ;                                 BL              timestamp                               ; updat
+                      ; e the timestamp
+00000274: EB00003D    ;                                 BL              scanAllKeys                             ; check
+                      ;  if any buttons pressed [keyboardAndButtons.s]
+00000278: EB000116    ;                                 BL              generateRandom                  ; create next p
+                      ; seudo-random number [random.s]
+0000027C:             ; 
+0000027C: E8BD4030    ;                                 POP     {R4-R5, LR}                     
+00000280: E1A0F00E    ;                                 MOV     PC, LR
+00000284:             ; 
+00000284:             ; 
+00000284:             ; 
+00000284:             ; ; --------------------------------SET UP INTERRUPTS-------------------------------
+00000284:             ; ; Enable only specific interrupts and set the IRQ stack pointer
+00000284:             ; ; local registers:      
+00000284:             ; ;       R4 - used for changing ARM mode, also a pointer to the base I/O address space
+00000284:             ; ;       R5 - interrupts sources enabled
+00000284:             ; 
+00000284: E92D0030    ; IRQsSetup               PUSH    {R4-R5}
+00000288: E10F4000    ;                                 MRS     R4, CPSR                                ; change mode t
+                      ; o Interrupt
+0000028C: E3C4401F    ;                                 BIC     R4, R4, #clearMode      
+00000290: E3844012    ;                                 ORR     R4, R4, #IRQMode        
+00000294: E12FF004    ;                                 MSR     CPSR, R4                
+00000298: E24FDD06    ;                                 ADR     SP, irqStack                    ; load IRQs stack point
+                      ; er
+0000029C: E3C4401F    ;                                 BIC     R4, R4, #clearMode              ; change back to Superv
+                      ; isor mode
+000002A0: E3844013    ;                                 ORR     R4, R4, #SVCMode 
+000002A4: E12FF004    ;                                 MSR     CPSR, R4
+000002A8:             ; 
+000002A8: E3A04201    ;                                 MOV     R4, #IOspace                    ; load the I/O space ba
+                      ; se address
+000002AC: E3A05001    ;                                 MOV     R5, #activeIRQs                 ; enable only specific 
+                      ; iterrupt sources
+000002B0: E5C4501C    ;                                 STRB    R5, [R4, #IRQEnablesAdr]        
+000002B4: E8BD0030    ;                                 POP     {R4-R5}
+000002B8: E1A0F00E    ;                                 MOV     PC, LR                                  ; return from t
+                      ; he method
+000002BC:             ; 
+000002BC:             ; 
+000002BC:             ; 
+000002BC:             ; ; ---------------------------------DEFINITIONS--------------------------------------           
+000002BC:             ; ; I/O addresses
+000002BC:             ; IOspace                 EQU     0x10000000                              ; starting address of I
+                      ; /O address space
+000002BC:             ; IRQsAdr                 EQU     0x18                                    ; interrupts active bit
+                      ; s offset
+000002BC:             ; IRQEnablesAdr   EQU     0x1C                                    ; interrupt enable bits offset 
+000002BC:             ; 
+000002BC:             ; ; FPGA addresses        
+000002BC:             ; FPGAspace               EQU     0x20000000                              ; starting address of F
+                      ; PGA address space 
+000002BC:             ; 
+000002BC:             ; ; ARM modes     
+000002BC:             ; userMode                EQU             0x10                                    ; append User m
+                      ; ode
+000002BC:             ; SVCMode                 EQU     0x13                                    ; append Supervisor mod
+                      ; e
+000002BC:             ; IRQMode                 EQU     0x12                                    ; append Iterrupt mode
+000002BC:             ; clearMode               EQU             0x1F                                    ; clear mode fi
+                      ; eld
+000002BC:             ; 
+000002BC:             ; ; IRQ definitions
+000002BC:             ; activeIRQs              EQU             0x01                                    ; enabled IRQs 
+                      ; (only timer can interrupt)
+000002BC:             ; enableIRQinCPU  EQU     0x80                                    ; enable IRQs inside the ARM CP
+                      ; U                                       
+000002BC:             ; timerIRQVec     EQU     0x01                                    ; timer IRQ vector
+000002BC:             ; 
+000002BC:             ; ; SVC calls 
+000002BC:             ; EXIT                    EQU     0                                               ; SVC call numb
+                      ; ers
+000002BC:             ; PRINT_CHAR              EQU     1
+000002BC:             ; TIME                    EQU     2
+000002BC:             ; READ_BUTTONS    EQU     3
+000002BC:             ; READ_KEYBOARD   EQU     4
+000002BC:             ; RAND                    EQU     5
+000002BC:             ; LED_WRITE               EQU     6
+000002BC:             ; LED_STORE               EQU     7
+000002BC:             ; LED_LOAD                EQU     8
+000002BC:             ; BUZZER_WRITE    EQU     9
+000002BC:             ; 
+000002BC:             ; ; Extra definitions
+000002BC:             ; MaxSVC                  EQU     10                                              ; upper limit f
+                      ; or the index of exception vector                
+000002BC:             ; 
+000002BC:             ; ; Program-switch definitions
+000002BC:             ; noOfUsrPrograms EQU     2                                               ; number of user progra
+                      ; ms loaded into memory
+000002BC: 00000000    ; programRunning  DEFW    0                                               ; current user program 
+                      ; in execution
+000002C0:             ; switchBeepLen   EQU     40
+000002C0:             ; switchBeepNo    EQU     4
+000002C0:             ; 
+000002C0:             ; ; ------------------------------------INCLUDES---------------------------------------          
+000002C0:             ; INCLUDE                 bcd.s                                                   ; BCD conversio
+                      ; n utility
+000002C0:             ; ;-----------------------------------------------------------------------------------
+000002C0:             ; ; BCD - Binary Coded Decimal
+000002C0:             ; ; Jim Garside 
+000002C0:             ; ; 10th April 2016
+000002C0:             ; ;
+000002C0:             ; ; Last edit: 6th May 2016 (Krzysztof Koch)
+000002C0:             ; ; 
+000002C0:             ; ; Binary to Binary Coded Decimal conversion utility. Code by Jim Garside with minor changes
+000002C0:             ; ; by Krzysztof Koch
+000002C0:             ; ;
+000002C0:             ; ; (Tab size - 4)
+000002C0:             ; ;-----------------------------------------------------------------------------------
+000002C0:             ; 
+000002C0:             ; 
+000002C0:             ; ;-------------------------------------CONVERT--------------------------------------
+000002C0:             ; ; Convert unsigned binary value in R0 into BCD representation, returned in R0
+000002C0:             ; ; Arguments:
+000002C0:             ; ;       R0 - unsigned binary value
+000002C0:             ; ; Returns:
+000002C0:             ; ;       R0 - binary coded decimal representation of the argument
+000002C0:             ; ; Local registers:
+000002C0:             ; ;       R7 - pointer to conversion table
+000002C0:             ; ;       R8 - Accumulates result         
+000002C0:             ; 
+000002C0: E92D41F0    ; bcd_convert             PUSH    {R4-R8, LR}             
+000002C4: E28F7028    ;                                 ADR             R7, dec_table           ; Point at conversion t
+                      ; able
+000002C8: E3A08000    ;                                 MOV             R8, #0                          ; Zero accumula
+                      ; tor
+000002CC:             ; 
+000002CC: E4974004    ; bcd_loop                LDR             R4, [R7], #4            ; Get next divisor, step pointe
+                      ; r
+000002D0: E3540001    ;                                 CMP             R4, #1                          ; Termination c
+                      ; ondition?
+000002D4: 0A000003    ;                                 BEQ             bcd_out                         ;  yes
+000002D8:             ; 
+000002D8: EB00000F    ;                                 BL              bcdDivide                       ; R0 := R0/R4 (
+                      ; rem. R5)
+000002DC: E0808208    ;                                 ADD             R8, R0, R8, LSL #4      ; Accumulate result
+000002E0: E1A00005    ;                                 MOV             R0, R5                          ; Recycle remai
+                      ; nder
+000002E4: EAFFFFF8    ;                                 B               bcd_loop                        ;
+000002E8:             ; 
+000002E8: E0800208    ; bcd_out                 ADD             R0, R0, R8, LSL #4      ; Accumulate result to output
+000002EC: E8BD41F0    ;                                 POP     {R4-R8, LR}                     
+000002F0: E1A0F00E    ;                                 MOV             PC, LR                          ; Return
+000002F4:             ; 
+000002F4: 3B9ACA00    ; dec_table               DCD             1000000000, 100000000, 10000000, 1000000
+000002F8: 05F5E100    ; 
+000002FC: 00989680    ; 
+00000300: 000F4240    ; 
+00000304: 000186A0    ;                                 DCD             100000, 10000, 1000, 100, 10, 1
+00000308: 00002710    ; 
+0000030C: 000003E8    ; 
+00000310: 00000064    ; 
+00000314: 0000000A    ; 
+00000318: 00000001    ; 
+0000031C:             ; 
+0000031C:             ; 
+0000031C:             ; 
+0000031C:             ; ;---------------------------32-BIT UNSIGNED DIVISION-------------------------------
+0000031C:             ; ; 32-bit unsigned integer division R0/R4. ; Returns quotient FFFFFFFF in case of division 
+0000031C:             ; ; by zero. Does not require a stack
+0000031C:             ; ; Arguments:
+0000031C:             ; ;       R0 - number to be divided
+0000031C:             ; ;       R4 - divident
+0000031C:             ; ; Returns:
+0000031C:             ; ;       R0 - quotient
+0000031C:             ; ;       R5 - remainder
+0000031C:             ; ; Local Registers:
+0000031C:             ; ;       R5 - AccH
+0000031C:             ; ;       R6 - Number of bits in division
+0000031C:             ; 
+0000031C: E3A05000    ; bcdDivide               MOV             R5, #0                          ; AccH
+00000320: E3A06020    ;                                 MOV             R6, #bitsInDivision     ; Number of bits in div
+                      ; ision
+00000324: E0900000    ;                                 ADDS    R0, R0, R0                      ; Shift dividend
+00000328:             ; 
+00000328: E0A55005    ; bcdDivide1              ADC             R5, R5, R5                      ; Shift AccH, carry int
+                      ; o LSB
+0000032C: E1550004    ;                                 CMP             R5, R4                          ; Will it go?
+00000330: 20455004    ;                                 SUBHS   R5, R5, R4                      ; If so, subtract
+00000334: E0B00000    ;                                 ADCS    R0, R0, R0                      ; Shift dividend & Acc.
+                      ;  result
+00000338: E2466001    ;                                 SUB             R6, R6, #1                      ; Loop count
+0000033C: E1160006    ;                                 TST             R6, R6                          ; Leaves carry 
+                      ; alone
+00000340: 1AFFFFF8    ;                                 BNE             bcdDivide1                      ; Repeat as req
+                      ; uired
+00000344:             ; 
+00000344: E1A0F00E    ;                                 MOV             PC, LR                          ; Return 
+00000348:             ; 
+00000348:             ; 
+00000348:             ; 
+00000348:             ; ; ---------------------------------DEFINITIONS--------------------------------------    
+00000348:             ; bitsInDivision  EQU     32
+00000348:             ; 
+00000348:             ; INCLUDE                 keyboardAndButtons.s                    ; Uxternal keyboard and on boar
+                      ; d buttons utilities
+00000348:             ; ;----------------------------------------------------------------------------------
+00000348:             ; ; Keyboard and Buttons utility methods
+00000348:             ; ; Krzysztof Koch
+00000348:             ; ; 15th March 2016
+00000348:             ; ;
+00000348:             ; ; Last edit: 6th May 2016
+00000348:             ; ; 
+00000348:             ; ; External keyboard and on-board buttons utility methods
+00000348:             ; ; 
+00000348:             ; ; (Tab size - 4)
+00000348:             ; ;----------------------------------------------------------------------------------
+00000348:             ; 
+00000348:             ; 
+00000348:             ; ; -----------------------------------SET UP KEYBOARD----------------------------------
+00000348:             ; ; Set the pin directions in selected PIO port for scanning keyboards - 4:0 to input and 7:5 to 
+                      ; output 
+00000348:             ; ; local registers:
+00000348:             ; ;       R4 - pointer to the starting address of FPGA memory space
+00000348:             ; ;       R5 - bit pattern to write to data and control registers of keyboard pins
+00000348:             ; 
+00000348: E92D0030    ; keyboardSetup   PUSH    {R4-R5}
+0000034C: E3A04202    ;                                 MOV     R4, #FPGAspace                  ; load the FPGA base ad
+                      ; dress
+00000350: E3A0501F    ;                                 MOV     R5, #pinDirKeyboard     ; set pin directions for both k
+                      ; eyboards
+00000354: E5C45003    ;                                 STRB    R5, [R4, #keypad1CtrlAdr]
+00000358: E5C4500F    ;                                 STRB    R5, [R4, #keypad2CtrlAdr]
+0000035C:             ;         
+0000035C: E3A05000    ;                                 MOV     R5, #noScan                             ; initially swi
+                      ; tch off keyboard scans 
+00000360: E5C45002    ;                                 STRB    R5, [R4, #keypad1DataAdr]
+00000364: E5C4500E    ;                                 STRB    R5, [R4, #keypad2DataAdr]
+00000368: E8BD0030    ;                                 POP     {R4-R5}
+0000036C: E1A0F00E    ;                                 MOV     PC, LR                                  ; return [OS.s]
+00000370:             ; 
+00000370:             ; 
+00000370:             ; 
+00000370:             ; ; ----------------------------------SCAN ALL KEYS------------------------------------
+00000370:             ; ; Scan both keyboards and the two buttons on the board. Pass the resulting 26-bits to 'updateKe
+                      ; ys' method
+00000370:             ; ; local registers:
+00000370:             ; ;       R0 - contains current key states, keeps being updated with each method called
+00000370:             ; ;       R1 - extra argument to called methods (keyboard to scan/button to scan)
+00000370:             ; 
+00000370:             ;                                 ; Scan the keyboard (3 rows) and combine the resulting bit patt
+                      ; erns
+00000370: E92D4003    ; scanAllKeys             PUSH    {R0-R1, LR}     
+00000374: E3A00000    ;                                 MOV     R0, #0                                  ; reset bit pat
+                      ; terns with currently pressed keys 
+00000378: E3A01002    ;                                 MOV     R1, #keypad1DataAdr             ; scan lower left keybo
+                      ; ard
+0000037C: EB000008    ;                                 BL      scanKeyboard            
+00000380: E3A01080    ;                                 MOV     R1, #lowButtonTst               ; scan lower of the but
+                      ; tons on board
+00000384: EB000015    ;                                 BL              scanButton
+00000388: E3A01040    ;                                 MOV     R1, #upButtonTst                ; scan upper of the but
+                      ; tons on board
+0000038C: EB000013    ;                                 BL              scanButton
+00000390: E3A0100E    ;                                 MOV     R1, #keypad2DataAdr             ; scan lower right keyb
+                      ; oard
+00000394: EB000002    ;                                 BL              scanKeyboard                    
+00000398: EB000019    ;                                 BL              updateKeys                              ; call 
+                      ; updateKeys with key states in R0
+0000039C: E8BD4003    ;                                 POP     {R0-R1, LR}
+000003A0: E1A0F00E    ;                                 MOV     PC, LR                                  ; return to the
+                      ;  main IRQ handler [OS.s]
+000003A4:             ; 
+000003A4:             ; 
+000003A4:             ; 
+000003A4:             ; ; ----------------------------------SCAN KEYBOARD------------------------------------
+000003A4:             ; ; Scan the keyboard specified in R1, and append the result to R0
+000003A4:             ; ; arguments:
+000003A4:             ; ;       R0 - current scan result
+000003A4:             ; ;       R1 - offset of the keyboard to scan (from FPGA space start)
+000003A4:             ; ; returns:
+000003A4:             ; ;       R0 - updated scan result with the keyboard scan
+000003A4:             ; ; local registers:
+000003A4:             ; ;       R4 - pointer to the starting address of FPGA memory space / IO space
+000003A4:             ; ;       R5 - current bitmask for scaning particular row / result of polling buttons on the boar
+                      ; d 
+000003A4:             ; ;       R6 - output from keyboard or button (key pressed or not)
+000003A4:             ; ;       R7 - pointer to table storing bitmasks for scanning individual keyboard rows
+000003A4:             ; ;       R8 - loop counter 
+000003A4:             ; 
+000003A4: E92D01F0    ; scanKeyboard    PUSH    {R4-R8}
+000003A8: E3A04202    ;                                 MOV     R4, #FPGAspace                  ; load the FPGA base ad
+                      ; dress
+000003AC: E28F7E11    ;                                 ADR     R7, rowScanBitmasks     ; load the table with bitmasks 
+                      ; for scanning rows
+000003B0: E3A08003    ;                                 MOV     R8, #noOfRows                   ; loop counter to contr
+                      ; ol the number of scans
+000003B4:             ; 
+000003B4: E4D75001    ; nextRow                 LDRB    R5, [R7], #1                    ; load the bitmask to scan the 
+                      ; next row
+000003B8: E7C45001    ;                                 STRB    R5, [R4, R1]                    ; scan next row
+000003BC: E7D46001    ;                                 LDRB    R6, [R4, R1]                    ; load the button state
+                      ; s in tested row
+000003C0: E206600F    ;                                 AND     R6, R6, #scanRow                ; filter out input bits
+                      ;  [3:0]
+000003C4: E0860200    ;                                 ADD     R0, R6, R0, LSL #4              ; add the result of lat
+                      ; est scan with the old one
+000003C8: E2588001    ;                                 SUBS    R8, R8, #1                              ; shifter by 4 
+                      ; to make space for it. Update loop counter
+000003CC: 1AFFFFF8    ;                                 BNE     nextRow                                 ; Repeat for re
+                      ; mainding rows until all are scanned
+000003D0:             ; 
+000003D0: E3A05000    ;                                 MOV     R5, #noScan                     ; switch off keyboard s
+                      ; cans until next IRQ
+000003D4: E7C45001    ;                                 STRB    R5, [R4, R1]            
+000003D8: E8BD01F0    ;                                 POP     {R4-R8}
+000003DC: E1A0F00E    ;                                 MOV     PC, LR
+000003E0:             ; 
+000003E0:             ; 
+000003E0:             ; 
+000003E0:             ; ; -----------------------------------SCAN BUTTONS-------------------------------------
+000003E0:             ; ; Scan the button specified in R1, and append the result to R0
+000003E0:             ; ; arguments:
+000003E0:             ; ;       R0 - current scan result
+000003E0:             ; ;       R1 - offset of the button to scan (from the base IO space)
+000003E0:             ; ; returns:
+000003E0:             ; ;       R0 - updated scan result with the keyboard scan
+000003E0:             ; ; local registers:
+000003E0:             ; ;       R4 - pointer to the starting address of the IO space
+000003E0:             ; ;       R5 - pressed (1) / not pressed (0), value to append
+000003E0:             ; 
+000003E0: E92D0030    ; scanButton              PUSH    {R4-R5}
+000003E4: E3A04201    ;                                 MOV     R4, #IOspace                    ; load the I/O space ba
+                      ; se address
+000003E8: E5D44004    ;                                 LDRB    R4, [R4, #buttonsAdr]   ; read the byte from buttons ad
+                      ; dress
+000003EC: E1140001    ;                                 TST     R4, R1                                  ; test if butto
+                      ; n pressed and append the                                                                
+000003F0: 03A05000    ;                                 MOVEQ   R5, #notPressed                 ; result to the one alr
+                      ; eady received from scanning
+000003F4: 13A05001    ;                                 MOVNE   R5, #pressed                    ; the keyboard
+000003F8: E0850080    ;                                 ADD     R0, R5, R0, LSL #1      
+000003FC: E8BD0030    ;                                 POP     {R4-R5}
+00000400: E1A0F00E    ;                                 MOV     PC, LR
+00000404:             ; 
+00000404:             ; 
+00000404:             ; 
+00000404:             ; ; --------------------------------UPDATE KEY STATES--------------------------------
+00000404:             ; ; Update the keyboards key states using the value in R0. Map this bit pattern to appropriate
+00000404:             ; ; bytes in memory space reserved for storing key states. Update states using the 
+00000404:             ; ; debouncing principle with shifting updated byte's value left by 1 on each update. This means
+00000404:             ; ; we store the history of last eight scans for each button.
+00000404:             ; ; local registers:
+00000404:             ; ;       R4 - pointer to 'key states' memory location
+00000404:             ; ;       R5 - pointer to the table containing offsets for bytes in 'keyStates'
+00000404:             ; ;       R6 - counter of keys to update (loop counter)
+00000404:             ; ;       R7 - the offset read from 'keyAdrOffsets' table, points to byte address we are going to
+                      ;  update
+00000404:             ; ;       R8 - current button state, value we are going to append to a specific byte
+00000404:             ; ;       R9 - updated key state to be stored in memory
+00000404:             ; ; arguments:
+00000404:             ; ;       R0 - its 26 least significant bits represent 26 current button states (1 for pressed) 
+00000404:             ; 
+00000404: E92D03F0    ; updateKeys              PUSH    {R4-R9}
+00000408: E28F40D4    ;                                 ADR     R4, keyStates                   ; load the pointer to t
+                      ; he memory for storing key states and
+0000040C: E28F50B4    ;                                 ADR     R5, keyAdrOffsets               ; one to the table cont
+                      ; aining offsets in 'keyStates'
+00000410: E3A0601A    ;                                 MOV     R6, #totalButtonNo      ; loop counter, counts number o
+                      ; f bits still to be considered
+00000414: E2866001    ;                                 ADD     R6, R6, #1
+00000418:             ; 
+00000418: E2566001    ; nextKey                 SUBS    R6, R6, #1                              ; decrement the loop co
+                      ; unter
+0000041C: 0A000007    ;                                 BEQ     finishUpdate                    ; terminate loop if all
+                      ;  bytes already updated
+00000420: E4D57001    ;                                 LDRB    R7, [R5], #1                    ; otherwise load the by
+                      ; te offset for given character
+00000424: E1B000A0    ;                                 LSRS    R0, R0, #1                              ; check if give
+                      ; n key pressed by shifting left and then
+00000428: 23A08001    ;                                 MOVCS   R8, #pressed                    ; investigating the Car
+                      ; ry flag to set the value to be
+0000042C: 33A08000    ;                                 MOVCC   R8, #notPressed                 ; written to the key's 
+                      ; memory location
+00000430: E7D49007    ;                                 LDRB    R9, [R4, R7]
+00000434: E0889089    ;                                 ADD     R9, R8, R9, LSL #1              ; update the key's memo
+                      ; ry location by dropping the msb
+00000438: E7C49007    ;                                 STRB    R9, [R4, R7]                    ;  and appending the ne
+                      ; w lsb by shifting the old value left
+0000043C: EAFFFFF5    ;                                 B               nextKey                                 ; by 1,
+                      ;  start the new iteration
+00000440:             ; 
+00000440: E8BD03F0    ; finishUpdate    POP     {R4-R9}                                 
+00000444: E1A0F00E    ;                                 MOV     PC, LR                                  ; return [keybo
+                      ; ardAndButtons.s]
+00000448:             ; 
+00000448:             ; 
+00000448:             ; 
+00000448:             ; ; ----------------------------------POLL KEYBOARD----------------------------------
+00000448:             ; ; Check if any button is pressed (after debouncing). If so, return the index of first button
+00000448:             ; ; which tested for being pressed is positive.
+00000448:             ; ; argument: 
+00000448:             ; ;       R0 - indicates if the mode from which this method called was priviliged or not
+00000448:             ; ; returns: 
+00000448:             ; ;       R0 - index of the button pressed. If no buttons pressed, returns <the total number of k
+                      ; eys> (12).
+00000448:             ; ; local registers:
+00000448:             ; ;       R4 - debounced key states table pointer
+00000448:             ; ;       R5 - loop counter (contains the current key index we are testing)
+00000448:             ; ;       R6 - values read from key states table for each key
+00000448:             ; 
+00000448: E8BD0010    ; keyboardPOLL    POP     {R4}                                    ; POP old R4 (before SVC table 
+                      ; pointer)
+0000044C: E92D0070    ;                                 PUSH    {R4-R6}                                 ; save register
+                      ; s used in this routine
+00000450:             ;                                 
+00000450: E28F408C    ;                                 ADR     R4, keyStates                   ; key states table poin
+                      ; ter
+00000454: E3A05000    ;                                 MOV     R5, #0                                  ; zero the key 
+                      ; counter (loop counter)
+00000458:             ;                                                                                                
+00000458: E7D46005    ; nextKeyPOLL             LDRB    R6, [R4, R5]                    ; poll the key
+0000045C: E35600FF    ;                                 CMP     R6, #testPressedDeb     ; check if pressed (of course d
+                      ; ebouncing already done)
+00000460: 0A000002    ;                                 BEQ     keyPressedFound                 ; if so, we've got a ke
+                      ; y to return so terminate loop
+00000464: E2855001    ;                                 ADD     R5, R5, #1                              ; increment the
+                      ;  loop counter
+00000468: E3550018    ;                                 CMP     R5, #keyNoTotal
+0000046C: 1AFFFFF9    ;                                 BNE     nextKeyPOLL                     ; repeat for the next k
+                      ; ey
+00000470:             ;                         
+00000470: E350000A    ; keyPressedFound CMP     R0, #MaxSVC
+00000474: E1A00005    ;                                 MOV     R0, R5                                  ; move the valu
+                      ; e to be returned
+00000478: E8BD0070    ;                                 POP     {R4-R6}
+0000047C: 01A0F00E    ;                                 MOVEQ   PC, LR                                  ; if past mode 
+                      ; was priviliged, return using LR_{priviliged}
+00000480: E1B0F00E    ;                                 MOVS    PC, LR                                  ; otherwise and
+                      ;  return using LR_user [USER_PROGRAM.s]
+00000484:             ; 
+00000484:             ; 
+00000484:             ; 
+00000484:             ; ; -----------------------------------POLL BUTTONS-----------------------------------
+00000484:             ; ; Check if any of the buttons on the board is pressed
+00000484:             ; ; arguments: 
+00000484:             ; ;       R0 - indicates if the mode from which this method called was priviliged or not
+00000484:             ; ; returns:      
+00000484:             ; ;       R0 - bit 2 raised if lower button pressed, bit 1 raised - upper. Zero otherwise
+00000484:             ; ; local registers: 
+00000484:             ; ;       R4 - pointer to the KeyStates table
+00000484:             ; ;       R5 - temporarily holds the result of polling buttons
+00000484:             ; ;       R6 - accumulates the results of polling
+00000484:             ; 
+00000484: E8BD0010    ; buttonsPOLL             POP     {R4}                                    ; POP old R4 (before SV
+                      ; C table pointer)
+00000488: E92D0070    ;                                 PUSH    {R4-R6}                                 
+0000048C: E28F4050    ;                                 ADR     R4, keyStates                   ; load the keyStates ta
+                      ; ble pointer
+00000490: E3A06000    ;                                 MOV     R6, #0                                  ; reset the reg
+                      ; ister that will accumulate polling results
+00000494:             ;                                                                                                
+00000494: E5D45018    ;                                 LDRB    R5, [R4, #lowButtonAdr] ; read the debounced status byt
+                      ; e of lower button
+00000498: E35500FF    ;                                 CMP     R5, #testPressedDeb     ; test if button pressed
+0000049C: 03A06002    ;                                 MOVEQ   R6, #lowPressed
+000004A0: 0A000002    ;                                 BEQ     buttonFound
+000004A4:             ; 
+000004A4: E5D45019    ;                                 LDRB    R5, [R4, #upButtonAdr]  ; read the debounced status byt
+                      ; e of upper button
+000004A8: E35500FF    ;                                 CMP     R5, #testPressedDeb     ; test if button pressed
+000004AC: 03A06001    ;                                 MOVEQ   R6, #upPressed                  ; combine this poll res
+                      ; ult with the previous one
+000004B0:             ; 
+000004B0: E354000A    ; buttonFound             CMP             R4, #MaxSVC                     ; check the SVC number 
+                      ; to see which mode to come back to
+000004B4: E1A00006    ;                                 MOV     R0, R6                                  ; the value is 
+                      ; returned in R0 so move it
+000004B8: E8BD0070    ;                                 POP     {R4-R6}                                 
+000004BC: 01A0F00E    ;                                 MOVEQ   PC, LR                                  ; if past mode 
+                      ; was priviliged, return using LR_{priviliged}
+000004C0: E1B0F00E    ;                                 MOVS    PC, LR                                  ; otherwise and
+                      ;  return using LR_user [USER_PROGRAM.s]
+000004C4:             ; 
+000004C4:             ; 
+000004C4:             ; 
+000004C4:             ; ; --------------------------------------DEFINITIONS--------------------------------------
+000004C4:             ; keypad1DataAdr  EQU     0x2                                     ; keypad data register offset (
+                      ; 1st keyboard)
+000004C4:             ; keypad1CtrlAdr  EQU     0x3                                     ; keypad control register offse
+                      ; t (1st keyboard)
+000004C4:             ; keypad2DataAdr  EQU     0xE                                     ; keypad data register offset (
+                      ; 2st keyboard)
+000004C4:             ; keypad2CtrlAdr  EQU     0xF                                     ; keypad control register offse
+                      ; t (2st keyboard)
+000004C4:             ; buttonsAdr              EQU     0x4                                     ; buttons offset
+000004C4:             ; 
+000004C4:             ; pinDirKeyboard  EQU     0x1F                                    ; set direction register 4:0 to
+                      ;  input and 7:5 to output
+000004C4:             ; totalButtonNo   EQU     26                                              ; total number of keys 
+                      ; scanned (12 + 12 keyboard + 2 on silicon)
+000004C4:             ; keyboardKeyNo   EQU     12                                              ; number of keys in a k
+                      ; eyboard
+000004C4:             ; keyNoTotal              EQU     24                                              ; total number 
+                      ; of keys in both keyboards
+000004C4:             ; noOfRows                EQU     3                                               ; number of row
+                      ; s to scan
+000004C4:             ; scanRow                 EQU     0x0F                                    ; bitmask to tests if a
+                      ; ny button pressed
+000004C4:             ; noScan                  EQU     0x0                                     ; bitmask that makes no
+                      ;  row be scanned
+000004C4:             ; 
+000004C4:             ; lowButtonTst    EQU     0x80                                    ; bitmasks for testing if lower
+                      ;  button pressed
+000004C4:             ; upButtonTst             EQU     0x40                                    ; bitmasks for testing 
+                      ; if upper button pressed
+000004C4:             ; testPressedDeb  EQU     0xFF                                    ; 0xFF pressed, not pressed oth
+                      ; erwise (after debouncing)
+000004C4:             ; lowButtonAdr    EQU     24                                              ; offset for lower butt
+                      ; on byte in the 'keyStates'
+000004C4:             ; upButtonAdr     EQU     25                                              ; offset for upper butt
+                      ; on byte in the 'keyStates'
+000004C4:             ; lowPressed              EQU     0x2                                     ; bitmask that represen
+                      ; ts lower button pressed
+000004C4:             ; upPressed               EQU     0x1                                     ; bitmask that represen
+                      ; ts upper button pressed
+000004C4:             ; 
+000004C4:             ; pressed                 EQU     1                                               ; bit to repres
+                      ; ent that key is pressed
+000004C4:             ; notPressed              EQU     0                                               ; bit to repres
+                      ; ent that key is not pressed
+000004C4:             ; 
+000004C4: 20 40 80    ; rowScanBitmasks DEFB    0x20, 0x40, 0x80                ; bitmask to scan (no/first/second/thir
+                      ; d) row
+000004C8:             ;                                 ALIGN
+000004C8:             ; 
+000004C8: 0C 0F 12 15 ; keyAdrOffsets   DEFB    12, 15, 18, 21                  ; offsets in memory from the keyStates 
+                      ; base address    
+000004CC: 0D 10 13 16 ;                                 DEFB    13, 16, 19, 22                  ; they map the bits fro
+                      ; m the current scan (26bits) to
+000004D0: 0E 11 14 17 ;                                 DEFB    14, 17, 20, 23                  ; 26 'key state' bytes 
+                      ;                 
+000004D4: 19 18 00 03 ;                                 DEFB    25, 24, 0, 3                    
+000004D8: 06 09 01 04 ;                                 DEFB    6, 9, 1, 4                              
+000004DC: 07 0A 02 05 ;                                 DEFB    7, 10, 2, 5                     
+000004E0: 08 0B       ;                                 DEFB    8, 11                                   
+000004E4:             ;                                 ALIGN
+000004E4:             ;  
+000004E4: 00 00 00 00 ; keyStates               DEFS    26, 0                                   ; store the key states 
+000004E8: 00 00 00 00 ; as bytes 
+000004EC: 00 00 00 00 ; 
+000004F0: 00 00 00 00 ; 
+000004F4: 00 00 00 00 ; 
+000004F8: 00 00 00 00 ; 
+000004FC: 00 00       ; 
+00000500:             ;                                 ALIGN                                                   
+00000500:             ;                                                         
+00000500:             ;                                         
+00000500:             ; INCLUDE         LCDscreen.s                                     ; LCD screen utilities
+00000500:             ; ;---------------------------------------------------------------------------------
+00000500:             ; ; LCD screen utility methods
+00000500:             ; ; Krzysztof Koch
+00000500:             ; ; 19th Feb 2016
+00000500:             ; ;
+00000500:             ; ; Last edit: 6th May 2016
+00000500:             ; ; 
+00000500:             ; ; Methods to communicate with the HD44780 LCD controler. 
+00000500:             ; ; 
+00000500:             ; ; (Tab size - 4)
+00000500:             ; ;---------------------------------------------------------------------------------
+00000500:             ; 
+00000500:             ; 
+00000500:             ; ; ----------------------------------SET UP LCD------------------------------------
+00000500:             ; ; Clear the screen, set the cursor to upper-left position and make it move to the right
+00000500:             ; ; arguments:
+00000500:             ; ;       R0 - SVC call number
+00000500:             ; ;       R1 - command issued to the LCD screen controller
+00000500:             ; ;       R2 - makes HD44780 controller interpret R1 value as command
+00000500:             ; ; local registers:
+00000500:             ; ;       R4 - pointer to the SETUP commands table
+00000500:             ; ;       R5 - loop counter for the table
+00000500:             ; 
+00000500: E92D4030    ; LCDSetup                PUSH    {R4-R5, LR}             
+00000504: E28F4E11    ;                                 ADR     R4, setUpCommands               ; load the pointer to t
+                      ; he table with commands for
+00000508: E3A05000    ;                                 MOV     R5, #0                                  ; LCD init, zer
+                      ; o the offset register (loop counter)
+0000050C: E7D41005    ; nextLCDCommand  LDRB    R1, [R4, R5]                    ; load the next command         
+00000510: E3A0000A    ;                                 MOV     R0, #MaxSVC                     ; load other arguments
+00000514: E3A02020    ;                                 MOV             R2, #LCDCommand
+00000518: EB000004    ;                                 BL              printChar                               ; issue
+                      ;  the command
+0000051C: E2855001    ;                                 ADD     R5, R5, #1                              ; update offset
+                      ; , increment the counter
+00000520: E3550002    ;                                 CMP     R5, #noOfSetupCmds              
+00000524: BAFFFFF8    ;                                 BLT     nextLCDCommand
+00000528: E8BD4030    ;                                 POP     {R4-R5, LR}                     ; return if no more com
+                      ; mands to set up the LCD
+0000052C: E1A0F00E    ;                                 MOV     PC, LR                                  
+00000530:             ; 
+00000530:             ; 
+00000530:             ; 
+00000530:             ; ;---------------------------------PRINT CHARACTER------------------------------ 
+00000530:             ; ; Output the given character or issue a command to the HD44780 LCD controller
+00000530:             ; ; Arguments:
+00000530:             ; ;       R0 - the previous mode (supervisor or user) from which the call was made. We need 
+00000530:             ; ;        to know which LR to use and which mode to come back to.
+00000530:             ; ;        If R0 == (number of SVC calls implemented) then come back to user mode. Otherwise
+00000530:             ; ;        R0 should be 1 as thats the number of SVC call for printChar
+00000530:             ; ;       R1 - character or command to be written to LCDs controller
+00000530:             ; ;       R2 - controls the behaviour of LCD once character is being written
+00000530:             ; ; Local Registers:
+00000530:             ; ;       R4 - pointer to LEDs data register (status + 4) / pointer to character count memory loc
+                      ; ation 
+00000530:             ; ;       R5 - contains the bitmask for testing the readiness of LCD controller / characters alre
+                      ; ady printed
+00000530:             ; ;       R6 - used to check if LCD controller ready 
+00000530:             ; 
+00000530: E350000A    ; printChar               CMP     R0, #MaxSVC                             ; POP old R4 (before SV
+                      ; C table pointer) if this 
+00000534: 18BD0010    ;                                 POPNE   {R4}                                    ; is the SVC ca
+                      ; ll
+00000538: E92D0070    ;                                 PUSH    {R4-R6}                                 ; push the regi
+                      ; sters used in the subroutine on stack
+0000053C: E3A04201    ;                                 MOV             R4, #IOspace                    ; load the addr
+                      ; ess of LCDs data register
+00000540: E3A05024    ;                                 MOV             R5, #readyCtlr                  ; Set to read â
+                      ; €˜controlâ€™ with data bus direction 
+00000544: E5C45004    ;                                 STRB    R5, [R4, #ctrlReg]              ; as input {R/W=1, RS=0
+                      ; } (Port B)
+00000548:             ; 
+00000548: E3855001    ; notReady                ORR             R5, R5, #enableBus              ; Enable bus (E :=1)  (
+                      ; Port B)
+0000054C: E5C45004    ;                                 STRB    R5, [R4, #ctrlReg]
+00000550: E5D46000    ;                                 LDRB    R6, [R4, #dataReg]      ; Read LCD status byte) (Port A
+                      ; )
+00000554: E20550FE    ;                                 AND     R5, R5, #disableBus             ; Disable bus (E :=0) (
+                      ; Port B)
+00000558: E5C45004    ;                                 STRB    R5, [R4, #ctrlReg]    
+0000055C: E2166080    ;                                 ANDS    R6, R6, #isReady
+00000560: 1AFFFFF8    ;                                 BNE             notReady                                ; If bi
+                      ; t 7 of status byte was high repeat from  
+00000564:             ;                                                                                                
+                      ; ; notReady
+00000564: E5C42004    ;                                 STRB    R2, [R4, #ctrlReg]              ; set the control accor
+                      ; ding to contents of R2
+00000568: E5C41000    ;                                 STRB    R1, [R4, #dataReg]              ; output desired byto o
+                      ; nto data bus (Port A)
+0000056C: E3822001    ;                                 ORR             R2, R2, #enableBus              ; Enable bus (E
+                      ;  :=1)  (Port B)
+00000570: E5C42004    ;                                 STRB    R2, [R4, #ctrlReg]
+00000574: E20220FE    ;                                 AND     R2, R2, #disableBus             ; Disable bus (E :=0) (
+                      ; Port B)
+00000578: E5C42004    ;                                 STRB    R2, [R4, #ctrlReg]      
+0000057C:             ;                         
+0000057C: E8BD0070    ; finishPrint             POP     {R4-R6}                                 ; pop registers from st
+                      ; ack
+00000580: E350000A    ;                                 CMP             R0, #MaxSVC                     ; if past mode 
+                      ; was priviliged, return using 
+00000584: 01A0F00E    ;                                 MOVEQ   PC, LR                                  ; LR_{privilige
+                      ; d}
+00000588: E1B0F00E    ;                                 MOVS    PC, LR                                  ; table in OS) 
+                      ; and return using LR_user
+0000058C:             ; 
+0000058C:             ; 
+0000058C:             ; 
+0000058C:             ; ;-----------------------------PRINT BINARY CODED DECIMAL-----------------------------
+0000058C:             ; ; Prints number in Binary Coded Decimal form in R0
+0000058C:             ; ; arguments:    
+0000058C:             ; ;       R0 - Binary coded decimal to print
+0000058C:             ; ; local regs: 
+0000058C:             ; ;       R4 - temporarily holds the BCD number to print
+0000058C:             ; ;       R5 - pointer to BCD digit shifts table, which contains information about shifst needed 
+                      ; to get
+0000058C:             ; ;                digit N in the 4 least significant bits
+0000058C:             ; ;       R6 - loop counter and offset for bcdShifts table
+0000058C:             ; ;       R7 - shift value
+0000058C:             ; 
+0000058C: E92D40F0    ; printBCD                PUSH    {R4-R7, LR}
+00000590: E1A04000    ;                                 MOV     R4, R0                                  ; move the argu
+                      ; ment, otherwise overwritten
+00000594: E28F5084    ;                                 ADR     R5, bcdShifts                   ; load the pointer to t
+                      ; he bcdShifts
+00000598: E3A06000    ;                                 MOV     R6, #0                                  ; reset the loo
+                      ; p counter
+0000059C:             ; 
+0000059C: E7D57006    ; nextBCD                 LDRB    R7, [R5, R6]                    ; load the next shift value
+000005A0: E1A00734    ;                                 LSR     R0, R4, R7                              ; print the bcd
+                      ;  digit in the 4 lest significant digits
+000005A4: EB000012    ;                                 BL              printHex
+000005A8: E2866001    ;                                 ADD     R6, R6, #1                              ; update the lo
+                      ; op counter and check if all digits 
+000005AC: E3560008    ;                                 CMP     R6, #bcdCount                   ; already. If so termin
+                      ; ate
+000005B0: BAFFFFF9    ;                                 BLT     nextBCD
+000005B4:             ; 
+000005B4: E8BD40F0    ;                                 POP     {R4-R7, LR}                     ; return from the routi
+                      ; ne restoring registers
+000005B8: E1A0F00E    ;                                 MOV     PC, LR                                  
+000005BC:             ; 
+000005BC:             ; 
+000005BC:             ; 
+000005BC:             ; ;----------------------------------PRINT STRING-------------------------------------
+000005BC:             ; ; Print String with R0 pointing to it.
+000005BC:             ; ; arguments:    
+000005BC:             ; ;       R0 - starting address of the string to print
+000005BC:             ; ; local regs: 
+000005BC:             ; ;       R4 - pointer to the table with values to be passed in R2 for SVC call for special comma
+                      ; nd
+000005BC:             ; ;                issuing
+000005BC:             ; ;       R5 - points to the next character to print
+000005BC:             ; 
+000005BC: E92D4030    ; printString             PUSH    {R4-R5, LR}                             ; push the registers us
+                      ; ed in the subroutine on stack
+000005C0: E1A05000    ;                                 MOV     R5 ,R0
+000005C4: E4D51001    ; nextChar                LDRB    R1, [R5], #1                    ; load the next character or co
+                      ; mmand
+000005C8: E3510000    ;                                 CMP             R1, #NULL                               ; check
+                      ;  if end of string
+000005CC: 08BD4030    ;                                 POPEQ   {R4-R5, LR}                     
+000005D0: 01A0F00E    ;                                 MOVEQ   PC, LR                          ; return from routine 
+000005D4:             ; 
+000005D4: E3510007    ;                                 CMP     R1, #noOfCmdsImpl
+000005D8: A3A02022    ;                                 MOVGE   R2, #ctrlWriteChar
+000005DC: B3A02020    ;                                 MOVLT   R2, #LCDCommand
+000005E0: B28F402C    ;                                 ADRLT   R4, LCDCmdsCodes
+000005E4: B7D41001    ;                                 LDRLTB  R1, [R4, R1]                                    
+000005E8: E3A00001    ;                                 MOV     R0, #PRINT_CHAR
+000005EC: EF000001    ;                                 SVC     1                                               ; print
+                      ;  character
+000005F0: EAFFFFF3    ;                                 B               nextChar                                ; branc
+                      ; h back for another call to PrintChar
+000005F4:             ; 
+000005F4:             ; 
+000005F4:             ; 
+000005F4:             ; 
+000005F4:             ; ;------------------------------HEXADECIMAL PRINT------------------------------
+000005F4:             ; ; Display a hexadecimal digit on the LCD screen
+000005F4:             ; ; arguments:    
+000005F4:             ; ;       R0 - hex value to print
+000005F4:             ; ; local registers
+000005F4:             ; ;       R4 - control signal for print char
+000005F4:             ; 
+000005F4: E92D4010    ; printHex                PUSH    {R4, LR}                                
+000005F8: E200000F    ;                                 AND     R0, R0, #maskOtherDigits ; get rid of other digits
+000005FC: E2801030    ;                                 ADD     R1, R0, #ASCIIoffset    ; convert from BCD to ASCII    
+00000600: E3A00001    ;                                 MOV     R0, #PRINT_CHAR                 ; change SVC vector to 
+                      ; print chars
+00000604: E3A02022    ;                                 MOV     R2, #ctrlWriteChar              ; set controls to print
+                      ; ing chars
+00000608: EF000001    ;                                 SVC     1                                               ; print
+0000060C: E8BD4010    ;                                 POP     {R4, LR}                                ; return from t
+                      ; he routine restoring
+00000610: E1A0F00E    ;                                 MOV     PC, LR                                  ; registers
+00000614:             ; 
+00000614:             ; 
+00000614:             ; 
+00000614:             ; ; ---------------------------------DEFINITIONS--------------------------------------           
+00000614:             ; dataReg                 EQU     0                                               ; offset from I
+                      ; O space base to LCD data reg
+00000614:             ; ctrlReg                 EQU     4                                               ; offset from I
+                      ; O space base to LCD control reg
+00000614:             ; readyCtlr               EQU             0x24                                    ; setup for che
+                      ; cking readiness of controller
+00000614:             ; isReady                 EQU             0x80                                    ; bitmask to te
+                      ; st LCDs readiness
+00000614:             ; enableBus               EQU     0x01                                    ; enable the bus betwee
+                      ; n LCD controller mem space
+00000614:             ; disableBus              EQU     0xFE                                    ; disable the bus betwe
+                      ; en LCD controller mem space
+00000614:             ; 
+00000614:             ; ; Two types of operations that can be performed on the LCD controller
+00000614:             ; LCDCommand              EQU     0x20                                    ; control bitmask for i
+                      ; ssueing a command
+00000614:             ; ctrlWriteChar   EQU             0x22                                    ; control bitmask for w
+                      ; riting an ordinary character
+00000614:             ; 
+00000614:             ; ; ASCII codes for various special characters - commands to controller
+00000614:             ; NULL                    EQU             0x00                                    ; End of string
+                      ;  
+00000614:             ; FF                              EQU     0x01                                    ; Form Feed    
+00000614:             ; FFdata                  EQU             0x01                                                   
+                      ;                 
+00000614:             ; LF                              EQU             0x02                                    ; Line 
+                      ; Feed 
+00000614:             ; LFdata                  EQU             0xC0                    
+00000614:             ; END                     EQU     0x03                                    ; Jump to the last cell
+                      ;  on the LCD screen
+00000614:             ; ENDdata                 EQU             0xCF                                                   
+00000614:             ; HOME                    EQU     0x04                                    ; Cursor Home   
+00000614:             ; HOMEdata                EQU             0x80                                                   
+                      ;                 
+00000614:             ; BACK                    EQU     0x05                                    ; Backwards Entry mode 
+                      ;                                                                         
+00000614:             ; FORW                    EQU             0x06                                    ; Forwards Entr
+                      ; y mode
+00000614:             ;                                         
+00000614:             ; ; Control bitmasks to be sent to the LCD controller for various commands
+00000614:             ; noOfCmdsImpl    EQU     7                                               ; number of control com
+                      ; mands for LCD implemented
+00000614: 00 01 C0 CF ; LCDCmdsCodes    DEFB    0x00, 0x01, 0xC0, 0xCF  ; control bit patterns for HD44780 controller c
+                      ; ommands
+00000618: 80 07 06    ;                                 DEFB    0x80, 0x07, 0x06                
+0000061C:             ;                                 ALIGN 
+0000061C:             ; 
+0000061C:             ; ; Commands for LCD setup
+0000061C:             ; noOfSetupCmds   EQU     2                                               ; number of commands
+0000061C: 01 06       ; setUpCommands   DEFB    0x01, 0x06                              ; commands to be issued to the 
+                      ; LCD at setup
+00000620:             ;                                 ALIGN
+00000620:             ; 
+00000620:             ; ; Binary Coded Decimals printing definitions
+00000620:             ; maskOtherDigits EQU     0x0000000F                              ; clear all bits except for 4 l
+                      ; east significant
+00000620:             ; ASCIIoffset     EQU     48                                              ; ASCII value for '0'
+00000620:             ; bcdCount                EQU     8                                               ; BCD digits th
+                      ; at can be displayed (fit in 1 register)
+00000620: 1C 18 14 10 ; bcdShifts               DEFB    28, 24, 20, 16                  ; shifts needed to get BCD digi
+                      ; ts for printing
+00000624: 0C 08 04 00 ;                                 DEFB    12,     8, 4, 0
+00000628:             ; 
+00000628:             ; 
+00000628:             ; INCLUDE         time.s                                                  ; System timing utiliti
+                      ; es
+00000628:             ; ;-----------------------------------------------------------------------------------
+00000628:             ; ; System timing utility methods
+00000628:             ; ; Krzysztof Koch
+00000628:             ; ; 10th April 2016
+00000628:             ; ;
+00000628:             ; ; Last edit: 17th April 2016
+00000628:             ; ; 
+00000628:             ; ; Methods to handle system timing by causing timer Interrupts every 1ms and storing the time el
+                      ; apsed
+00000628:             ; ; since system initalisation (in milliseconds) in timestampAdr memory location
+00000628:             ; ; 
+00000628:             ; ; (Tab size - 4)
+00000628:             ; ;-----------------------------------------------------------------------------------
+00000628:             ; 
+00000628:             ; 
+00000628:             ; 
+00000628:             ; ; ------------------------------------POLL TIMESTAMP----------------------------------
+00000628:             ; ; Poll the timestamp memory location to get the time elapsed since system initialisation
+00000628:             ; ; in ms.
+00000628:             ; ; Arguments:
+00000628:             ; ;       R0 - SVC call number, if called from supervisor mode then equal to MaxSVC
+00000628:             ; ; Returns:  
+00000628:             ; ;       R0,R1 - timestamp value
+00000628:             ; ; Local register:
+00000628:             ; ;       R4 - pointer to timestampAdr memory location
+00000628:             ; 
+00000628: E350000A    ; timestampPOLL   CMP     R0, #MaxSVC                             ; Check if we're dealing with S
+                      ; VC call. If so,
+0000062C: 18BD0010    ;                                 POPNE   {R4}                                    ; POP old R4 (b
+                      ; efore SVC table pointer)
+00000630: E92D0010    ;                                 PUSH    {R4}
+00000634: E28F4094    ;                                 ADR     R4, timestampAdr                ; load the address of t
+                      ; he timer        
+00000638: E5140000    ;                                 LDR     R0, [R4]                                ; read the curr
+                      ; ent timer value
+0000063C: E5941004    ;                                 LDR     R1, [R4, #4]
+00000640: E8BD0010    ;                                 POP     {R4}
+00000644: 01A0F00E    ;                                 MOVEQ   PC, LR                                  ; return to the
+                      ;  caller method, OR...
+00000648: E1B0F00E    ;                                 MOVS    PC, LR                                  ; return from t
+                      ; his Supervisor call [USER_CODE.s]
+0000064C:             ; 
+0000064C:             ; 
+0000064C:             ; 
+0000064C:             ; ; -----------------------------------UPDATE TIMESTAMP--------------------------------
+0000064C:             ; ; Set a new timing checkpoint for the hardware timer (every milisecond) and update the timestam
+                      ; p
+0000064C:             ; ; value every 100ms. It is done by storing the 100ms counter at [ms100CounterAdr]
+0000064C:             ; ; local registers:
+0000064C:             ; ;       R4 - pointer to the base of I/O address space
+0000064C:             ; ;       R5 - new timing checkpoint / first word in timestampAdr memory location
+0000064C:             ; ;       R6 - second word in timestamp memory location
+0000064C:             ; 
+0000064C: E92D0070    ; timestamp               PUSH    {R4-R6}
+00000650: E3A04201    ;                                 MOV     R4, #IOspace                    ; load the I/O space ba
+                      ; se address
+00000654: E5D4500C    ;                                 LDRB    R5, [R4, #timerCompAdr] ; load the old timer checkpoint
+00000658: E2855001    ;                                 ADD     R5, R5, #1                              ; Calculate the
+                      ;  new timing checkpoint
+0000065C: E3550C01    ;                                 CMP     R5, #maxTimerVal                
+00000660: 22455C01    ;                                 SUBHS   R5, R5, #maxTimerVal    ; Do the modulo reduction if re
+                      ; quired.
+00000664: E5C4500C    ;                                 STRB    R5, [R4, #timerCompAdr] ; update the value of timer com
+                      ; pare register
+00000668:             ; 
+00000668: E28F4060    ;                                 ADR     R4, timestampAdr                ; Update the timestamp 
+                      ; value by incrementing
+0000066C: E5145000    ;                                 LDR     R5, [R4]                                ; it by 1, bear
+                      ; ing in mind that it is a long (64 bit)
+00000670: E5946004    ;                                 LDR     R6, [R4, #4]                    ; number
+00000674: E2955001    ;                                 ADDS    R5, R5, #1
+00000678: E2A66000    ;                                 ADC     R6, R6, #0      
+0000067C: E5045000    ;                                 STR     R5, [R4]
+00000680: E5846004    ;                                 STR     R6, [R4, #4]
+00000684: E8BD0070    ;                                 POP     {R4-R6} 
+00000688: E1A0F00E    ;                                 MOV     PC, LR                                  ; return [OS.s]
+0000068C:             ; 
+0000068C:             ; 
+0000068C:             ; 
+0000068C:             ; ; ------------------------------------WAIT----------------------------------------
+0000068C:             ; ; Delay execution by R0 number of milliseconds
+0000068C:             ; ; Arguments:
+0000068C:             ; ;       R0 - time to wait (in milliseconds)
+0000068C:             ; ; Local registers:
+0000068C:             ; ;       R4,R5 - time target to reach
+0000068C:             ; ;       R6 - temporarily holds the time to wait
+0000068C:             ; 
+0000068C: E3500000    ; wait                    CMP     R0, #0                                  ; check if we should be
+                      ;  waiting at all
+00000690: B1A0F00E    ;                                 MOVLT   PC, LR
+00000694: E92D4070    ;                                 PUSH    {R4-R6, LR}
+00000698: E1A06000    ;                                 MOV     R6, R0                                  ; move the valu
+                      ; e in R0 so it is not overwritten
+0000069C: E3A00002    ;                                 MOV     R0, #TIME
+000006A0: EF000002    ;                                 SVC     2                                               ; get t
+                      ; he current timestamp value and move it to
+000006A4: E1A04000    ;                                 MOV     R4, R0                                  ; local registe
+                      ; rs
+000006A8: E1A05001    ;                                 MOV     R5, R1
+000006AC: E0844006    ;                                 ADD     R4, R4, R6                              ; calculate the
+                      ;  time target
+000006B0: E2A55000    ;                                 ADC     R5, R5, #0
+000006B4:             ; 
+000006B4: E3A00002    ; notYet                  MOV     R0, #TIME                               ; keep checking if the 
+                      ; timestampAdr value has
+000006B8: EF000002    ;                                 SVC     2                                               ; reach
+                      ; ed the target. If so, return from method
+000006BC: E1500004    ;                                 CMP     R0, R4
+000006C0: 01510005    ;                                 CMPEQ   R1, R5
+000006C4: BAFFFFFA    ;                                 BLT     notYet
+000006C8:             ; 
+000006C8: E8BD4070    ;                                 POP     {R4-R6, LR}
+000006CC: E1A0F00E    ;                                 MOV     PC, LR                                          
+000006D0:             ; 
+000006D0:             ; 
+000006D0:             ; 
+000006D0:             ; ; ---------------------------------DEFINITIONS--------------------------------------           
+000006D0:             ; timeHardwareAdr EQU     0x8                                     ; timer offser
+000006D0:             ; timerCompAdr    EQU     0xC                                     ; timer compare register offset
+000006D0:             ; maxTimerVal     EQU     0x100                                   ; maximum value of timer, the M
+                      ; odulo
+000006D0:             ; 
+000006D0:             ; 
+000006D0: 00000000    ; timestampAdr    DEFW    0                                               ; timestamp value memor
+                      ; y location (value in ms)
+000006D4: 00000000    ;                                 DEFW    0
+000006D8:             ; 
+000006D8:             ; INCLUDE         random.s                                                ; Random numbers utilit
+                      ; ies
+000006D8:             ; ;-----------------------------------------------------------------------------------
+000006D8:             ; ; Random numbers utility methods
+000006D8:             ; ; Krzysztof Koch
+000006D8:             ; ; 16th April 2016
+000006D8:             ; ;
+000006D8:             ; ; Last edit: 6th May 2016
+000006D8:             ; ; 
+000006D8:             ; ; Methods to generate pseudo-random numbers using the Linear Feedback Shift Register software 
+000006D8:             ; ; emulation, and to read the latest radom number generated. LFSR is emulated in software and 
+000006D8:             ; ; generate next random number at timer interrupts (every millisecond)
+000006D8:             ; ; 
+000006D8:             ; ; (Tab size - 4)
+000006D8:             ; ;-----------------------------------------------------------------------------------
+000006D8:             ; 
+000006D8:             ; 
+000006D8:             ; 
+000006D8:             ; ;--------------------------------"RANDOM" NUMBER GENERATOR------------------------------- 
+000006D8:             ; ; Software implementation of the Linear Feedback Shift Register. Generates a new pseudo-random
+000006D8:             ; ; 32-bit value whenever called and stores it at lfsr memory location
+000006D8:             ; ; Local Registers:
+000006D8:             ; ;       R4 - pointer to the lfsr memory location, which stores the current random number genera
+                      ; ted
+000006D8:             ; ;       R5 - pointer to the table with the feedback polynomial / final updated value stored in 
+                      ; lfsr
+000006D8:             ; ;       R6 - value in lfsr memory location, gets shifted multiple times
+000006D8:             ; ;       R7 - loop counter and offset in the polynomial table
+000006D8:             ; ;       R8 - current shift value (no of bits)
+000006D8:             ; ;       R9 - XORed value of shifting results
+000006D8:             ; ;       R10 - result of shifting
+000006D8:             ; 
+000006D8: E92D07F0    ; generateRandom  PUSH    {R4-R10}
+000006DC: E28F4060    ;                                 ADR     R4, lfsr                                
+000006E0: E28F5060    ;                                 ADR     R5, polynomial
+000006E4: E5146000    ;                                 LDR     R6, [R4]                                ; load the last
+                      ;  random value
+000006E8: E3A07000    ;                                 MOV     R7, #0                                  ; initialise th
+                      ; e loop counter/offset
+000006EC:             ; 
+000006EC: E7D58007    ;                                 LDRB    R8, [R5, R7]                    ; generate the bit to b
+                      ; e prepended as the most significant
+000006F0: E1A09836    ;                                 LSR     R9, R6, R8                              ; by shifting t
+                      ; he original random number by bit offsets
+000006F4: E2877001    ;                                 ADD     R7, R7, #1                              ; specified in 
+                      ; the polynomial table and XOR these results
+000006F8:             ;                                                                                                
+                      ; ; together
+000006F8: E7D58007    ; nextTerm                LDRB    R8, [R5, R7]
+000006FC: E1A0A836    ;                                 LSR     R10, R6, R8
+00000700: E029900A    ;                                 EOR     R9, R9, R10
+00000704: E2877001    ;                                 ADD     R7, R7, #1
+00000708: E3570004    ;                                 CMP     R7, #termsInPoly
+0000070C: BAFFFFF9    ;                                 BLT     nextTerm 
+00000710:             ; 
+00000710: E2095001    ;                                 AND             R5, R9, #1                              ; "1" i
+                      ; n the feedback polynomial - x^32 + x^22 + x^2 + x^1 + 1
+00000714: E1A05F85    ;                                 LSL     R5, R5, #31                     ; now shift the old num
+                      ; ber by 1 to the right and prepend
+00000718: E1A060A6    ;                                 LSR     R6, R6, #1                              ; the calculate
+                      ; d bit in R5 as the most significant bit
+0000071C: E1855006    ;                                 ORR     R5, R5, R6
+00000720: E5045000    ;                                 STR     R5, [R4]
+00000724: E8BD07F0    ;                                 POP     {R4-R10}
+00000728: E1A0F00E    ;                                 MOV     PC, LR
+0000072C:             ; 
+0000072C:             ; 
+0000072C:             ; 
+0000072C:             ; ;-----------------------------------GET RANDOM NUMBER----------------------------------
+0000072C:             ; ; Return the next random number generated by the LFSR register
+0000072C:             ; ; returns:
+0000072C:             ; ;       R0 - random number (pseudo)
+0000072C: E350000A    ; getRandom               CMP     R0, #MaxSVC                             ; Chek if we're dealing
+                      ;  with SVC call. If so,
+00000730: 18BD0010    ;                                 POPNE   {R4}                                    ; POP old R4 (b
+                      ; efore SVC table pointer)
+00000734: E28F0008    ;                                 ADR     R0, lfsr                                ; load the addr
+                      ; ess of the random number
+00000738: E5100000    ;                                 LDR     R0, [R0]                                ; read the curr
+                      ; ent random number
+0000073C: 01A0F00E    ;                                 MOVEQ   PC, LR                                  ; return to the
+                      ;  caller method, OR...
+00000740: E1B0F00E    ;                                 MOVS    PC, LR                                  ; return from t
+                      ; his Supervisor call [USER_CODE.s]
+00000744:             ; 
+00000744:             ; 
+00000744:             ; 
+00000744:             ; ;------------------------------------DEFINITIONS------------------------------------
+00000744: A3E902FF    ; lfsr                    DEFW    0xA3E902FF                              ; starting value fo the
+                      ;  pseudo-random number generator
+00000748:             ;                                                                                                
+                      ; ; chosen by me, quite arbitralily
+00000748:             ; termsInPoly     EQU     4
+00000748: 00 0A 1E 1F ; polynomial              DEFB    0, 10, 30, 31                   ; feedback polynomial - x^32 + 
+                      ; x^22 + x^2 + x^1. (+1)
+0000074C:             ;                                                                                                
+                      ; ; values are "taps" that affect output  
+0000074C:             ; INCLUDE                 math.s                                                  ; Mathematical 
+                      ; function utilities
+0000074C:             ; ;-----------------------------------------------------------------------------------
+0000074C:             ; ; Mathematical utility methods
+0000074C:             ; ; Krzysztof Koch
+0000074C:             ; ; 16th April 2016
+0000074C:             ; ;
+0000074C:             ; ; Last edit: 6th May 2016
+0000074C:             ; ; 
+0000074C:             ; ; Implementation of common mathematical funcions 
+0000074C:             ; ; 
+0000074C:             ; ; (Tab size - 4)
+0000074C:             ; ;-----------------------------------------------------------------------------------
+0000074C:             ; 
+0000074C:             ; 
+0000074C:             ; ;----------------------------------------ADDITION----------------------------------------
+0000074C:             ; ; Add the value in R0 to the one in R1
+0000074C:             ; ; Arguments:
+0000074C:             ; ;       R0 - total value to be updated
+0000074C:             ; ;       R1 - to add
+0000074C:             ; ; Returns:
+0000074C:             ; ;       R0 - value in R1 after addition
+0000074C:             ; 
+0000074C: E0800001    ; plus                    ADD     R0, R0, R1
+00000750: E1A0F00E    ;                                 MOV     PC, LR
+00000754:             ; 
+00000754:             ; 
+00000754:             ; 
+00000754:             ; ;--------------------------------------SUBTRACTION----------------------------------------
+00000754:             ; ; Subtract the value in R0 from the one in R1
+00000754:             ; ; Arguments:
+00000754:             ; ;       R0 - total value to be updated
+00000754:             ; ;       R1 - to subtract
+00000754:             ; ; Returns:
+00000754:             ; ;       R0 - value in R1 after subtraction
+00000754:             ; 
+00000754: E0400001    ; minus                   SUB     R0, R0, R1
+00000758: E1A0F00E    ;                                 MOV     PC, LR
+0000075C:             ; 
+0000075C:             ; 
+0000075C:             ; 
+0000075C:             ; ;-------------------------------------MULTIPLICATION--------------------------------------
+0000075C:             ; ; Multiply the value in R1 by the one in R0
+0000075C:             ; ; Arguments:
+0000075C:             ; ;       R0 - total
+0000075C:             ; ;       R1 - multilier
+0000075C:             ; ; Returns:
+0000075C:             ; ;       R0 - result
+0000075C:             ; 
+0000075C: E0000190    ; multiply                MUL     R0, R0, R1
+00000760: E1A0F00E    ;                                 MOV     PC, LR
+00000764:             ; 
+00000764:             ; 
+00000764:             ; 
+00000764:             ; ;---------------------------------DIVISION WITH REMAINDER---------------------------------
+00000764:             ; ; Divide the value in R0 by the value in R1 (Euclidean division) Returns both the quotient and
+00000764:             ; ; the remainder
+00000764:             ; ; Arguments:
+00000764:             ; ;       R0 - divident
+00000764:             ; ;       R1 - divisor
+00000764:             ; ; Returns:
+00000764:             ; ;       R0 - quotient
+00000764:             ; ;       R1 - remainder
+00000764:             ; ; Local registers:
+00000764:             ; ;       R4 - temporarily holds the quotient
+00000764:             ; 
+00000764: E3510000    ; divAndMod               CMP     R1, #0                                  ; division by zero not 
+                      ; allowed so no division
+00000768: 01A0F00E    ;                                 MOVEQ   PC, LR                                  ; is performed
+0000076C: E92D0010    ;                                 PUSH    {R4}
+00000770: E3A04000    ;                                 MOV     R4, #0
+00000774:             ; 
+00000774: E1500001    ; divisionLoop    CMP     R0, R1
+00000778: A0400001    ;                                 SUBGE   R0, R0, R1
+0000077C: A2844001    ;                                 ADDGE   R4, R4, #1
+00000780: AAFFFFFB    ;                                 BGE     divisionLoop    
+00000784:             ; 
+00000784: E1A01000    ;                                 MOV     R1, R0
+00000788: E1A00004    ;                                 MOV     R0, R4
+0000078C: E8BD0010    ;                                 POP     {R4}
+00000790: E1A0F00E    ;                                 MOV     PC, LR
+00000794:             ; 
+00000794:             ; 
+00000794:             ; 
+00000794:             ; ;--------------------------------------DIVISION-----------------------------------------
+00000794:             ; ; Divide the value in R0 by the value in R1. Return the quotient
+00000794:             ; ; Arguments:
+00000794:             ; ;       R0 - divident
+00000794:             ; ;       R1 - divisor
+00000794:             ; ; Returns:
+00000794:             ; ;       R0 - quotient
+00000794:             ; 
+00000794: E92D4000    ; divide                  PUSH    {LR}
+00000798: EBFFFFF1    ;                                 BL              divAndMod
+0000079C: E8BD8000    ;                                 POP     {PC}
+000007A0:             ; 
+000007A0:             ; 
+000007A0:             ; 
+000007A0:             ; ;--------------------------------------MODULO------------------------------------------
+000007A0:             ; ; Divide the value in R0 by the value in R1. Return the remainder
+000007A0:             ; ; Arguments:
+000007A0:             ; ;       R0 - divident
+000007A0:             ; ;       R1 - divisor
+000007A0:             ; ; Returns:
+000007A0:             ; ;       R0 - remainder
+000007A0:             ; 
+000007A0: E92D4000    ; modulo                  PUSH    {LR}
+000007A4: EBFFFFEE    ;                                 BL              divAndMod
+000007A8: E1A00001    ;                                 MOV     R0, R1
+000007AC: E8BD8000    ;                                 POP     {PC}
+000007B0:             ; 
+000007B0:             ; 
+000007B0:             ; 
+000007B0:             ; ;--------------------------------------POWER-------------------------------------------
+000007B0:             ; ; Raise value in R1 to the power in R0
+000007B0:             ; ; Arguments:
+000007B0:             ; ;       R0 - base
+000007B0:             ; ;       R1 - power
+000007B0:             ; ; Returns:
+000007B0:             ; ;       R0 - result
+000007B0:             ; ; Local registers:
+000007B0:             ; ;       R4 - loop counter, number of times multiplication should be performed
+000007B0:             ; 
+000007B0: E3510000    ; power                   CMP     R1, #0                                  ; number raised to 0 po
+                      ; wer is always 1
+000007B4: 03A00001    ;                                 MOVEQ   R0, #1                                  
+000007B8: 01A0F00E    ;                                 MOVEQ   PC, LR
+000007BC: E92D4010    ;                                 PUSH    {R4, LR}
+000007C0: E1A04001    ;                                 MOV     R4, R1                                  ; move values i
+                      ; n registers so arguments for
+000007C4: E1A01000    ;                                 MOV     R1, R0                                  ; multiply meth
+                      ; od are agreed
+000007C8:             ;                                 
+000007C8: E2544001    ; powerLoop               SUBS    R4, R4, #1                              ; repeatedly multiply (
+                      ; power - 1) times
+000007CC: 1BFFFFE2    ;                                 BLNE    multiply
+000007D0: 1AFFFFFC    ;                                 BNE     powerLoop
+000007D4:             ;                                 
+000007D4: E8BD4010    ;                                 POP     {R4, LR}
+000007D8: E1A0F00E    ;                                 MOV     PC, LR
+000007DC:             ; 
+000007DC:             ; 
+000007DC:             ; 
+000007DC:             ; ;-----------------------------------SQUARE ROOT---------------------------------------
+000007DC:             ; ; Calculate te square root of the value in R0. (Newton method of integer square root approximat
+                      ; ion)
+000007DC:             ; ; Arguments:
+000007DC:             ; ;       R0 - number to calculate the square root of
+000007DC:             ; ; Returns:
+000007DC:             ; ;       R0 - result
+000007DC:             ; ; Local registers:
+000007DC:             ; ;       R4 - res
+000007DC:             ; ;       R5 - bit
+000007DC:             ; ;       R6 - possible new value of num
+000007DC:             ; 
+000007DC: E92D0070    ; squareRoot              PUSH    {R4-R6}                                 ; res = 0
+000007E0: E3A04000    ;                                 MOV     R4, #0                                  ; bit = 1 << 30
+000007E4: E3A05001    ;                                 MOV     R5, #1
+000007E8: E1A05F05    ;                                 LSL     R5, R5, #30
+000007EC:             ;                                                                                                
+                      ; ; while (bit > num
+000007EC: E1550000    ; shiftAgain              CMP     R5, R0                                  ;       bit >>= 2;
+000007F0: C1A05125    ;                                 LSRGT   R5, R5, #2
+000007F4: CAFFFFFC    ;                                 BGT     shiftAgain
+000007F8:             ;                                                                                                
+000007F8: E3550000    ; rootLoop                CMP     R5, #0                                  ; while (bit != 0) 
+000007FC: 0A000007    ;                                 BEQ     rootFound                               ; {
+00000800: E0856004    ;                                 ADD     R6, R5, R4                              ;       if (num
+                      ;  >= res + bit) 
+00000804: E1500006    ;                                 CMP     R0, R6                                  ;       {
+00000808: A0400006    ;                                 SUBGE   R0, R0, R6                              ;              
+                      ; num -= res + bit;
+0000080C: A1A040A4    ;                                 LSRGE   R4, R4, #1                              ;              
+                      ; res = (res >> 1) + bit;
+00000810: A0844005    ;                                 ADDGE   R4, R4, R5                              ;       } else
+00000814: B1A040A4    ;                                 LSRLT   R4, R4, #1                              ;              
+                      ; res >>= 1;
+00000818: E1A05125    ;                                 LSR     R5, R5, #2                              ;       bit >>=
+                      ;  2;
+0000081C: EAFFFFF5    ;                                 B               rootLoop                                ; }
+00000820:             ; 
+00000820: E1A00004    ; rootFound               MOV     R0, R4
+00000824: E8BD0070    ;                                 POP     {R4-R6}
+00000828: E1A0F00E    ;                                 MOV     PC, LR
+0000082C:             ; 
+0000082C:             ; 
+0000082C:             ; 
+0000082C:             ; ;----------------------------------GREATEST COMMON DIVISOR------------------------------------
+0000082C:             ; ; Calculate the Greates Common Divisor of values in R0 and R1 and return it in R0. (Euclidean
+0000082C:             ; ; algorithm)
+0000082C:             ; ; Arguments:
+0000082C:             ; ;       R0 - a
+0000082C:             ; ;       R1 - b
+0000082C:             ; ; Returns:
+0000082C:             ; ;       R0 - greatest common divisor of a and b
+0000082C:             ; 
+0000082C: E1500001    ; gcd                     CMP     R0, R1
+00000830: C0400001    ;                                 SUBGT   R0, R0, R1
+00000834: B0411000    ;                                 SUBLT   R1, R1, R0
+00000838: 1AFFFFFB    ;                                 BNE     gcd
+0000083C:             ; 
+0000083C: E1A0F00E    ;                                 MOV     PC, LR
+00000840:             ; 
+00000840:             ; 
+00000840:             ; 
+00000840:             ; ;-------------------------------------FACTORIAL-----------------------------------------
+00000840:             ; ; Calculate factorial of value in R1
+00000840:             ; ; Arguments:
+00000840:             ; ;       R0 - to calculate factorial of
+00000840:             ; ; Returns:
+00000840:             ; ;       R0 - result
+00000840:             ; 
+00000840: E92D4000    ; factorial               PUSH    {LR}
+00000844: E3500000    ;                                 CMP     R0, #0                                  ; factorial of 
+                      ; 0 is 1
+00000848: 03A00001    ;                                 MOVEQ   R0, #1
+0000084C: 11A01000    ;                                 MOVNE   R1, R0
+00000850:             ; 
+00000850: 12511001    ; factorialLoop   SUBNES  R1, R1, #1                              ; repeated miliplication with t
+                      ; he multiplier
+00000854: 1BFFFFC0    ;                                 BLNE    multiply                                ; decreasing by
+                      ;  1
+00000858: 1AFFFFFC    ;                                 BNE     factorialLoop
+0000085C:             ; 
+0000085C: E8BD8000    ;                                 POP     {PC}
+00000860:             ; 
+00000860:             ; 
+00000860:             ; 
+00000860:             ; ;-------------------------------------RANDOM-----------------------------------------
+00000860:             ; ; Return a random value that can be represented using 8 decimal digits
+00000860:             ; ; Returns:
+00000860:             ; ;       R0 - result
+00000860:             ; 
+00000860: E92D4000    ; rand                    PUSH    {LR} 
+00000864: E3A00005    ;                                 MOV     R0, #RAND                               ; get the 32-bi
+                      ; t unsigned random number
+00000868: EF000005    ;                                 SVC     5
+0000086C: E1A00320    ; reduceNumber    LSR     R0, R0, #6                              ; shift necessary so that the r
+                      ; andom number can
+00000870: E8BD4000    ;                                 POP     {LR}                                    ; be represente
+                      ; d using 8 decimal digits (< 9999999)
+00000874: E1A0F00E    ;                                 MOV     PC, LR                                  ; because of us
+                      ; ing bcd_convert routine that can only
+00000878:             ;                                                                                                
+                      ; ; represent decimals up to 8 digits
+00000878:             ; INCLUDE                 LED.s                                                   ; Methods to co
+                      ; ntrol the LEDs on board
+00000878:             ; ;--------------------------------------------------------------------------------------
+00000878:             ; ; LED utility methods
+00000878:             ; ; Krzysztof Koch
+00000878:             ; ; 17th April 2016
+00000878:             ; ;
+00000878:             ; ; Last edit: 6th May 2016
+00000878:             ; ; 
+00000878:             ; ; Methods to control the LEDs on board.
+00000878:             ; ; 
+00000878:             ; ; (Tab size - 4)
+00000878:             ; ;--------------------------------------------------------------------------------------
+00000878:             ; 
+00000878:             ; 
+00000878:             ; ;---------------------------------------SETUP LEDs------------------------------------
+00000878:             ; ; Initially switch off all the LEDs.
+00000878:             ; ; Local registers:
+00000878:             ; ;       R4 - IOspace base pointer
+00000878:             ; ;       R5 - value to write to switch off al the LEDs
+00000878:             ; 
+00000878: E92D0030    ; setupLEDs               PUSH    {R4-R5}
+0000087C: E3A04201    ;                                 MOV     R4, #IOspace                    ; switch off all the LE
+                      ; Ds
+00000880: E3A05000    ;                                 MOV     R5, #0                                  
+00000884: E5C45000    ;                                 STRB    R5, [R4, #LEDaddress]
+00000888:             ; 
+00000888: E5D45004    ;                                 LDRB    R5, [R4, #LEDEnAddress] ; enable LEDs
+0000088C: E3855010    ;                                 ORR     R5, R5, #LEDEnable
+00000890: E5C45004    ;                                 STRB    R5, [R4, #LEDEnAddress]
+00000894: E8BD0030    ;                                 POP     {R4-R5}
+00000898: E1A0F00E    ;                                 MOV     PC, LR
+0000089C:             ; 
+0000089C:             ; 
+0000089C:             ; 
+0000089C:             ; ;------------------------------------STORE LEDs STATE----------------------------------
+0000089C:             ; ; Save the state of LEDs in another memory location, so printing to LCD screen doesn't pernamen
+                      ; tly
+0000089C:             ; ; change the LED lights. I use this and the following method because of legacy code for printin
+                      ; g
+0000089C:             ; ; characters to LCD screen that didn't consider that the same ports are used for LED lights. Th
+                      ; is 
+0000089C:             ; ; hasn't been a problem before I started doing PWM and printing the on cycle at the same time.
+0000089C:             ; ; Arguments:
+0000089C:             ; ;       R0 - SVC call number, if called from supervisor mode then equal to MaxSVC
+0000089C:             ; ; Local registers:
+0000089C:             ; ;       R4 - IOspace base pointer 
+0000089C:             ; ;       R5 - byte to be moved between the memory locations to save LEDs state
+0000089C:             ; ;       R6 - pointer to backup memory locations
+0000089C:             ; 
+0000089C: E350000A    ; storeLEDs               CMP     R0, #MaxSVC                             ; Check if we're dealin
+                      ; g with SVC call. If so,
+000008A0: 18BD0010    ;                                 POPNE   {R4}                                    ; POP old R4 (b
+                      ; efore SVC table pointer)
+000008A4: E92D0070    ;                                 PUSH    {R4-R6}
+000008A8: E3A04201    ;                                 MOV     R4, #IOspace                    ; Save the state at add
+                      ; ress 10000000,                                  
+000008AC: E5D45000    ;                                 LDRB    R5, [R4, #LEDaddress]   ; actual lights that are on
+000008B0: E28F6E13    ;                                 ADR     R6, LEDstate
+000008B4: E5465000    ;                                 STRB    R5, [R6]
+000008B8: E5D45004    ;                                 LDRB    R5, [R4, #LEDEnAddress] ; Save the state at address 100
+                      ; 00004, 
+000008BC: E28F6F4A    ;                                 ADR     R6, LEDcontrol                  ; Most importantly LED 
+                      ; enable bit
+000008C0: E5465000    ;                                 STRB    R5, [R6]
+000008C4: E8BD0070    ;                                 POP     {R4-R6}
+000008C8: E350000A    ;                                 CMP     R0, #MaxSVC
+000008CC: 01A0F00E    ;                                 MOVEQ   PC, LR                                  ; return to the
+                      ;  caller method, OR...
+000008D0: E1B0F00E    ;                                 MOVS    PC, LR                                  ; return from t
+                      ; his Supervisor call [USER_CODE.s]
+000008D4:             ; 
+000008D4:             ; 
+000008D4:             ; 
+000008D4:             ; ;-----------------------------------RESTORE LEDs STATE---------------------------------
+000008D4:             ; ; Restore the value in the extra memory location back to the address of LEDs
+000008D4:             ; ; Arguments:
+000008D4:             ; ;       R0 - SVC call number, if called from supervisor mode then equal to MaxSVC
+000008D4:             ; ; Local registers:
+000008D4:             ; ;       R4 - pointer to LED state backup locations
+000008D4:             ; ;       R5 - LED bit pattern to be moved between the memory locations to restore the state
+000008D4:             ; ;       R6 - IOspace base pointer 
+000008D4:             ; 
+000008D4: E350000A    ; restoreLEDs     CMP     R0, #MaxSVC                             ; Check if we're dealing with S
+                      ; VC call. If so,
+000008D8: 18BD0010    ;                                 POPNE   {R4}                                    ; POP old R4 (b
+                      ; efore SVC table pointer)
+000008DC: E92D0070    ;                                 PUSH    {R4-R6}
+000008E0: E28F4C01    ;                                 ADR     R4, LEDstate                    ; Restore the state at 
+                      ; address 10000000,
+000008E4: E5545000    ;                                 LDRB    R5, [R4]                                ; actual lights
+                      ;  that are on
+000008E8: E3A06201    ;                                 MOV     R6, #IOspace                                           
+                      ;         
+000008EC: E5C65000    ;                                 STRB    R5, [R6, #LEDaddress]   
+000008F0: E28F40F4    ;                                 ADR     R4, LEDcontrol                  ; Restore the state at 
+                      ; address 10000004
+000008F4: E5545000    ;                                 LDRB    R5, [R4]                                ; Most importan
+                      ; tly LED enable bit
+000008F8: E5C65004    ;                                 STRB    R5, [R6, #LEDEnAddress]
+000008FC: E8BD0070    ;                                 POP     {R4-R6}
+00000900: E350000A    ;                                 CMP     R0, #MaxSVC
+00000904: 01A0F00E    ;                                 MOVEQ   PC, LR                                  ; return to the
+                      ;  caller method, OR...
+00000908: E1B0F00E    ;                                 MOVS    PC, LR                                  ; return from t
+                      ; his Supervisor call [USER_CODE.s]
+0000090C:             ; 
+0000090C:             ; 
+0000090C:             ; 
+0000090C:             ; ;-----------------------------------SWITCH LED ON/OF-----------------------------------
+0000090C:             ; ; Method to turn the LED in R1 on/off depending on the value in R2
+0000090C:             ; ; Arguments:
+0000090C:             ; ;       R0 - SVC call number, if called from supervisor mode then equal to MaxSVC
+0000090C:             ; ;       R1 - LED number, LED to turn on/off
+0000090C:             ; ;       R2 - 0 (off), any other value (on)
+0000090C:             ; ; Local register:
+0000090C:             ; ;       R4 - pointer to the starting address of the I/O space
+0000090C:             ; ;       R5 - state of LED before the change
+0000090C:             ; ;       R6 - used to generate bitmask to turn specific pin on without affecting other pins
+0000090C:             ;                                 
+0000090C: E350000A    ; switchLED               CMP     R0, #MaxSVC                             ; Check if we're dealin
+                      ; g with SVC call. If so,
+00000910: 18BD0010    ;                                 POPNE   {R4}                                    ; POP old R4 (b
+                      ; efore SVC table pointer)
+00000914: E92D0070    ;                                 PUSH    {R4-R6}
+00000918: E3A04201    ;                                 MOV     R4, #IOspace                    ; enable LED switching 
+0000091C:             ;                         
+0000091C: E5D45000    ;                                 LDRB    R5, [R4, #LEDaddress]   ; load the current bitmask for 
+                      ; LED lights
+00000920: E3A06001    ;                                 MOV     R6, #1  
+00000924: E1A06116    ;                                 LSL     R6, R6, R1                              ; create bitmas
+                      ; ks so that turning specific LED on/off
+00000928: E3520000    ;                                 CMP     R2, #0                                  ; check if we s
+                      ; hould switch given LED on or off
+0000092C: 11855006    ;                                 ORRNE   R5, R5, R6                              ; won't affect 
+                      ; others
+00000930: 01E06006    ;                                 MVNEQ   R6, R6
+00000934: 00055006    ;                                 ANDEQ   R5, R5, R6 
+00000938: E5C45000    ;                                 STRB    R5, [R4, #LEDaddress]   ; update the state of LEDs
+0000093C:             ; 
+0000093C: E350000A    ;                                 CMP     R0, #MaxSVC 
+00000940: E8BD0070    ;                                 POP     {R4-R6}
+00000944: 01A0F00E    ;                                 MOVEQ   PC, LR                                  ; return to the
+                      ;  caller method, OR...
+00000948: E1B0F00E    ;                                 MOVS    PC, LR                                  ; return from t
+                      ; his Supervisor call [USER_CODE.s]
+0000094C:             ; 
+0000094C:             ; 
+0000094C:             ; 
+0000094C:             ; ;--------------------------------PULSE-WIDTH MODULATION------------------------------
+0000094C:             ; ; Pulse-width modulate the LED given in R0. The code assumes the period length is 20ms. And the
+                      ;  
+0000094C:             ; ; on-cycle length is read from pulseWidth memory location
+0000094C:             ; ; Arguments:
+0000094C:             ; ;       R0 - LED number to apply PWM to
+0000094C:             ; ; Local register:
+0000094C:             ; ;       R4 - temporarily holds the LED number so that it doesn't get overwritten
+0000094C:             ; ;       R5 - pulse length (in milliseconds)
+0000094C:             ;                                 
+0000094C: E92D4030    ; pwmLED                  PUSH    {R4-R5, LR}
+00000950: E1A04000    ;                                 MOV     R4, R0                                  ; move the argu
+                      ; ment so it doesn't get overwritten
+00000954: E28F5088    ;                                 ADR     R5, pulseWidth                  ; load the pulse Length
+                      ;  from memory
+00000958: E5155000    ;                                 LDR     R5, [R5]                                
+0000095C:             ; 
+0000095C: E3A00006    ;                                 MOV     R0, #LED_WRITE                  ; switch the LED on
+00000960: E1A01004    ;                                 MOV     R1, R4                                  
+00000964: E3A02001    ;                                 MOV     R2, #1
+00000968: EF000006    ;                                 SVC     6
+0000096C: E1A00005    ;                                 MOV     R0, R5                                  ; wait for the 
+                      ; [pulseWidth] number of millisecons
+00000970: EBFFFF45    ;                                 BL              wait
+00000974: E3A00006    ;                                 MOV     R0, #LED_WRITE                  ; switch the LED off
+00000978: E1A01004    ;                                 MOV     R1, R4
+0000097C: E3A02000    ;                                 MOV     R2, #0
+00000980: EF000006    ;                                 SVC     6
+00000984: E2650014    ;                                 RSB     R0, R5, #period                 ; wait the [period] - [
+                      ; pulseWidth] number of ms
+00000988: EBFFFF3F    ;                                 BL      wait
+0000098C:             ; 
+0000098C: E8BD4030    ;                                 POP     {R4-R5, LR}
+00000990: E1A0F00E    ;                                 MOV     PC, LR
+00000994:             ; 
+00000994:             ; 
+00000994:             ; 
+00000994:             ; ;---------------------------------INCREASE PULSE WIDTH--------------------------------
+00000994:             ; ; Increment the pulse width by 1.
+00000994:             ; ; Local registers:
+00000994:             ; ;       R4 - pointer to the pulseWidth memory location
+00000994:             ; ;       R5 - value at pulseWidth
+00000994:             ; 
+00000994: E92D0030    ; incrPulseWidth  PUSH    {R4-R5}
+00000998: E28F4044    ;                                 ADR     R4, pulseWidth
+0000099C: E5145000    ;                                 LDR     R5, [R4]
+000009A0: E3550014    ;                                 CMP     R5, #period                     ; increment the pulse w
+                      ; idth only when it is shorter
+000009A4: B2855001    ;                                 ADDLT   R5, R5, #1                              ; than the peri
+                      ; od
+000009A8: E5045000    ;                                 STR     R5, [R4] 
+000009AC: E8BD0030    ;                                 POP     {R4-R5}
+000009B0: E1A0F00E    ;                                 MOV     PC, LR
+000009B4:             ; 
+000009B4:             ; 
+000009B4:             ; 
+000009B4:             ; ;---------------------------------DECREASE PULSE WIDTH--------------------------------
+000009B4:             ; ; Decrement the pulse width by 1.
+000009B4:             ; ; Local registers:
+000009B4:             ; ;       R4 - pointer to the pulseWidth memory location
+000009B4:             ; ;       R5 - value at pulseWidth
+000009B4:             ; 
+000009B4: E92D0030    ; decrPulseWidth  PUSH    {R4-R5}
+000009B8: E28F4024    ;                                 ADR     R4, pulseWidth
+000009BC: E5145000    ;                                 LDR     R5, [R4]
+000009C0: E3550000    ;                                 CMP     R5, #0                                  ; decrement the
+                      ;  pulse width only of it is positive
+000009C4: C2455001    ;                                 SUBGT   R5, R5, #1
+000009C8: E5045000    ;                                 STR     R5, [R4] 
+000009CC: E8BD0030    ;                                 POP     {R4-R5}
+000009D0: E1A0F00E    ;                                 MOV     PC, LR
+000009D4:             ; 
+000009D4:             ; 
+000009D4:             ; 
+000009D4:             ; ;---------------------------------CHANGE DEFAULT LED--------------------------------
+000009D4:             ; ; Calculate the next LED to be the default one for switching on and off (used in PWMtest.s)
+000009D4:             ; ; Arguments:
+000009D4:             ; ;       R0 - index of the current LED to be switched On/Off on default
+000009D4:             ; ; Returns:
+000009D4:             ; ;       R0 - index of the next LED to be controlled on default
+000009D4:             ; 
+000009D4: E2800001    ; changeLED               ADD     R0, R0, #1                              ; make sure we wrap up 
+                      ; the index to match the number 
+000009D8: E3500008    ;                                 CMP     R0, #numberOfLEDs               ; of LEDs on board
+000009DC: 03A00000    ;                                 MOVEQ   R0, #0
+000009E0: E1A0F00E    ;                                 MOV     PC, LR
+000009E4:             ; 
+000009E4:             ; 
+000009E4:             ; 
+000009E4:             ; ; ---------------------------------DEFINITIONS--------------------------------------
+000009E4:             ; LEDaddress              EQU     0x0                                     ; offset from IO space 
+                      ; base to LED address
+000009E4:             ; LEDEnAddress    EQU     0x4                                             ; offset from IO space 
+                      ; base to LED enable bit address
+000009E4:             ; LEDEnable               EQU     0x10                                    ; bitmask to enable/dis
+                      ; able LED
+000009E4:             ; 
+000009E4:             ; numberOfLEDs    EQU     8                                               ; number of LEDs on the
+                      ;  board
+000009E4:             ; GreenLeft               EQU     0x0                                     ; bit numbers correspon
+                      ; ding to specific lights 
+000009E4:             ; AmberLeft               EQU     0x1                                     ; on the board
+000009E4:             ; RedLeft                 EQU     0x2             
+000009E4:             ; BlueLeft                EQU     0x3             
+000009E4:             ; GreenRight              EQU     0x4             
+000009E4:             ; AmberRight              EQU     0x5             
+000009E4:             ; RedRight                EQU     0x6             
+000009E4:             ; BlueRight               EQU     0x7     
+000009E4:             ; 
+000009E4:             ; period                  EQU     20                                              ; Pulse-width-m
+                      ; odulation period (in ms)
+000009E4: 00000014    ; pulseWidth              DEFW    20                                              ; Pulse-width-m
+                      ; odulation on cycle (in ms) 
+000009E8:             ; 
+000009E8: 00          ; LEDstate                DEFB    0x0                                     ; temporaily holds LED 
+                      ; states and control bitmask 
+000009EC:             ;                                 ALIGN
+000009EC: 00          ; LEDcontrol              DEFB    0x0                                     ; while character is pr
+                      ; inted to the LCD screen
+000009F0:             ;                                 ALIGN
+000009F0:             ; INCLUDE         buzzer.s                                                ; 
+000009F0:             ; ;-----------------------------------------------------------------------------------
+000009F0:             ; ; Piezo Buzzer
+000009F0:             ; ; Krzysztof Koch
+000009F0:             ; ; 5th May 2016
+000009F0:             ; ;
+000009F0:             ; ; Last edit: 6th May 2016
+000009F0:             ; ; 
+000009F0:             ; ; Methods to use the piezo-buzzer attached to one of the keyboards. The buzzer is assumed to 
+000009F0:             ; ; be attached to PIO 0 - the S0 connector
+000009F0:             ; ;
+000009F0:             ; ; (Tab size - 4)
+000009F0:             ; ;-----------------------------------------------------------------------------------
+000009F0:             ; 
+000009F0:             ; 
+000009F0:             ; 
+000009F0:             ; ;----------------------------------WRITE TO BUZZER----------------------------------
+000009F0:             ; ; Write the value in R1 to buzzer memory location
+000009F0:             ; ; Arguments:
+000009F0:             ; ;       R0 - SVC call number, if called from supervisor mode then equal to MaxSVC
+000009F0:             ; ; Local registers:
+000009F0:             ; ;       R4 - pointer to the base of FPGA address space
+000009F0:             ; 
+000009F0: E350000A    ; buzzerWrite     CMP     R0, #MaxSVC                             ; Check if we're dealing with S
+                      ; VC call. If so,
+000009F4: 18BD0010    ;                                 POPNE   {R4}                                    ; POP old R4 (b
+                      ; efore SVC table pointer)
+000009F8: E92D0010    ;                                 PUSH    {R4}
+000009FC: E3A04202    ;                                 MOV     R4, #FPGAspace                  ; write the value to th
+                      ; e buzzer byte in FPGA mem space
+00000A00: E5C41000    ;                                 STRB    R1, [R4, #buzzerAdr]
+00000A04: E8BD0010    ;                                 POP     {R4}
+00000A08: E350000A    ;                                 CMP     R0, #MaxSVC
+00000A0C: 01A0F00E    ;                                 MOVEQ   PC, LR                                  ; return to the
+                      ;  caller method, OR...
+00000A10: E1B0F00E    ;                                 MOVS    PC, LR                                  ; return from t
+                      ; his Supervisor call [USER_CODE.s]       
+00000A14:             ; 
+00000A14:             ; 
+00000A14:             ; 
+00000A14:             ; ;---------------------------------BEEP THE BUZZER-----------------------------------
+00000A14:             ; ; Beep the buzzer for amount of time specified in R0
+00000A14:             ; ; Arguments:
+00000A14:             ; ;       R0 - time to beep (in ms)
+00000A14:             ; ; Local registers:
+00000A14:             ; ;       R4 - temporarily holds the argument
+00000A14:             ; 
+00000A14: E92D4010    ; beep                    PUSH    {R4, LR}                                
+00000A18: E1A04000    ;                                 MOV     R4, R0
+00000A1C: E3A00009    ;                                 MOV     R0, #BUZZER_WRITE               ; turn the buzzer on
+00000A20: E3A010FF    ;                                 MOV     R1, #buzzerOn
+00000A24: EF000009    ;                                 SVC     9
+00000A28: E1A00004    ;                                 MOV     R0, R4
+00000A2C: EBFFFF16    ;                                 BL              wait                                    ; wait
+00000A30: E3A00009    ;                                 MOV     R0, #BUZZER_WRITE
+00000A34: E3A01000    ;                                 MOV     R1, #buzzerOff                  ; turn the buzzer off
+00000A38: EF000009    ;                                 SVC     9
+00000A3C: E8BD4010    ;                                 POP     {R4, LR}
+00000A40: E1A0F00E    ;                                 MOV     PC, LR
+00000A44:             ; 
+00000A44:             ; 
+00000A44:             ; 
+00000A44:             ; ;-------------------------------BEEP-BEEP THE BUZZER-------------------------------
+00000A44:             ; ; Beep the buzzer number of times specified in R1, each time for number od milliseconds
+00000A44:             ; ; in R0.
+00000A44:             ; ; Arguments:
+00000A44:             ; ;       R0 - time to beep (in ms) each time
+00000A44:             ; ;       R1 - number of beeps
+00000A44:             ; ; Local registers:
+00000A44:             ; 
+00000A44: E92D4030    ; beepBeep                PUSH    {R4-R5, LR}
+00000A48: E1A04000    ;                                 MOV     R4, R0                                  ; move the argu
+                      ; ments so not overwritten
+00000A4C: E1A05001    ;                                 MOV     R5, R1
+00000A50:             ;                                 
+00000A50: E1A00004    ; beepAgain               MOV     R0, R4                                  ; beep for amount of ti
+                      ; me in R0
+00000A54: EBFFFFEE    ;                                 BL              beep
+00000A58: E1A00004    ;                                 MOV     R0, R4                                  ; wait for amou
+                      ; nt of time in R0
+00000A5C: EBFFFF0A    ;                                 BL              wait
+00000A60: E2555001    ;                                 SUBS    R5, R5, #1                              ; decrement the
+                      ;  beep counter
+00000A64: 1AFFFFF9    ;                                 BNE     beepAgain                               ; repeat if not
+                      ;  all the beeps made
+00000A68:             ; 
+00000A68: E8BD4030    ;                                 POP     {R4-R5, LR}
+00000A6C: E1A0F00E    ;                                 MOV     PC, LR
+00000A70:             ; 
+00000A70:             ; 
+00000A70:             ; 
+00000A70:             ; 
+00000A70:             ; 
+00000A70:             ; ;------------------------------------DEFINITIONS------------------------------------
+00000A70:             ; buzzerAdr               EQU             0x0                                     ; Offset from t
+                      ; he FPGA base for buzzer PIO
+00000A70:             ; buzzerOn                EQU     0xFF                                    ; value to write to mak
+                      ; e sound
+00000A70:             ; buzzerOff               EQU     0x0                                     ; value to write to mak
+                      ; e the buzzer silent
+00000A70:             ; 
+00000A70:             ; INCLUDE         calculator.s                                    ; User program - simple calcula
+                      ; tor
+00000A70:             ; ;--------------------------------------------------------------------------------------
+00000A70:             ; ; Calculator
+00000A70:             ; ; Krzysztof Koch
+00000A70:             ; ; 12th April 2016
+00000A70:             ; ;
+00000A70:             ; ; Last edit: 6th April 2016
+00000A70:             ; ; 
+00000A70:             ; ; Calculator implementing most common integer arithmetic operations. 
+00000A70:             ; ; Instructions:
+00000A70:             ; ;       1. You start with total equal to 0 and displayed at the bottom of LCD screen.
+00000A70:             ; ;       2. To input a number, press digit buttons on the left keyboard. As you write the number
+00000A70:             ; ;          digits should appear in the top row which represents the current value
+00000A70:             ; ;       3. All binary arithmetic operations take tha value from total (bottom) and the current
+00000A70:             ; ;          input value to perform (addition, division, Greatest Common Divisor etc)
+00000A70:             ; ;       4. All unary operations use just the total value at the bottom (factorial etc)
+00000A70:             ; ;       5. Random number generator just overwrites the total value ot the bottom
+00000A70:             ; ;       6. To clear the sceen as well as all calculator memory (total and current value) press
+00000A70:             ; ;          the lower button on the on-board
+00000A70:             ; ;       7. To switch the application to another press upper button on board
+00000A70:             ; ;       8. This all implies that there is no '=' operator as in ordinary calculator and you fir
+                      ; st
+00000A70:             ; ;          Input a number and then you specify the operation to perform on it
+00000A70:             ; ;
+00000A70:             ; ; Register use:
+00000A70:             ; ;       R4 - holds the last button pressed for comparison to detect when the button was release
+                      ; d
+00000A70:             ; ; 
+00000A70:             ; ; (Tab size - 4)
+00000A70:             ; ;--------------------------------------------------------------------------------------
+00000A70:             ; 
+00000A70:             ; 
+00000A70:             ; ; ===================================CALCULATOR FSM====================================
+00000A70: EB000022    ; calculator              BL              showTotal                               ; stat by displ
+                      ; aying the total
+00000A74:             ; 
+00000A74:             ; 
+00000A74:             ; ; ----------------------------------TEST IF KEY PRESSED--------------------------------
+00000A74: E3A00004    ; checkKeyboard   MOV     R0, #READ_KEYBOARD              ; poll the keyboard                    
+                      ;                                                                 
+00000A78: EF000004    ;                                 SVC     4
+00000A7C: E3500018    ;                                 CMP     R0, #keyNoTotal                 ; if no key pressed jum
+                      ; p to buttons polling
+00000A80: AA000007    ;                                 BGE     checkButtons
+00000A84: E1A04000    ;                                 MOV             R4, R0                                  ; other
+                      ; wise, store the character in R4
+00000A88:             ; 
+00000A88:             ; 
+00000A88:             ; ; --------------------------------WAITING FOR KEY RELEASE------------------------------
+00000A88: E3A00004    ; stillPressedKey MOV     R0, #READ_KEYBOARD              ; keep checking if the same key is stil
+                      ; l pressed
+00000A8C: EF000004    ;                                 SVC     4                                               
+00000A90: E1500004    ;                                 CMP             R0, R4                                  
+00000A94: 0AFFFFFB    ;                                 BEQ     stillPressedKey
+00000A98:             ; 
+00000A98:             ; 
+00000A98:             ; ; -----------------------------------INTERPTET THE KEY---------------------------------
+00000A98: E1A00004    ;                                 MOV     R0, R4                                  ; run the metho
+                      ; d that analyses the key pressed
+00000A9C: EB00000F    ;                                 BL              interptetKey
+00000AA0: EAFFFFFF    ;                                 B               checkButtons                    ; check the but
+                      ; tons 
+00000AA4:             ; 
+00000AA4:             ; 
+00000AA4:             ; ; ---------------------------------TEST IF BUTTON PRESSED------------------------------
+00000AA4: E3A00003    ; checkButtons    MOV     R0, #READ_BUTTONS               ; poll the on-board buttons
+00000AA8: EF000003    ;                                 SVC     3
+00000AAC: E3500000    ;                                 CMP     R0, #0
+00000AB0: 0AFFFFEF    ;                                 BEQ     checkKeyboard                   ; if no button pressed 
+                      ; jump to keyboard polling
+00000AB4: E1A04000    ;                                 MOV     R4, R0
+00000AB8:             ; 
+00000AB8:             ; 
+00000AB8:             ; ; --------------------------------WAITING FOR BUTTON RELEASE---------------------------
+00000AB8: E3A00003    ; stillPressedBtn MOV     R0, #READ_BUTTONS               ; keep checking if the same button is s
+                      ; till pressed
+00000ABC: EF000003    ;                                 SVC     3                                               
+00000AC0: E1500004    ;                                 CMP             R0, R4                                  
+00000AC4: 0AFFFFFB    ;                                 BEQ     stillPressedBtn
+00000AC8:             ; 
+00000AC8:             ; 
+00000AC8:             ; ; -------------------------------INTERPRET THE BUTTON PRESSED--------------------------
+00000AC8: E3140001    ;                                 TST     R4, #upPressed                  ; if upper button press
+                      ; ed then close the program
+00000ACC: 13A00000    ;                                 MOVNE   R0, #EXIT                               ; and start the
+                      ;  next one
+00000AD0: 1F000000    ;                                 SVCNE   0
+00000AD4: E3140002    ;                                 TST     R4, #lowPressed                 ; if its the lower then
+                      ;  clear the screen, and 
+00000AD8: 1B000017    ;                                 BLNE    clearTotal                              ; calculator me
+                      ; mory
+00000ADC: EAFFFFE4    ;                                 B               checkKeyboard
+00000AE0:             ; 
+00000AE0:             ; ; =====================================================================================
+00000AE0:             ; 
+00000AE0:             ; 
+00000AE0:             ; 
+00000AE0:             ; ;---------------------------------------INTERPRET KEY------------------------------------
+00000AE0:             ; ; Using value in R0 (index of the key pressed). Assign a unique binary value to it and use it
+00000AE0:             ; ; to either update the number currently being typed (top one on screen) or if it's an arithmeti
+                      ; c
+00000AE0:             ; ; operator then run the method to handle that 
+00000AE0:             ; ; Arguments:
+00000AE0:             ; ;       R0 - index of the key pressed
+00000AE0:             ; ; Local registers:
+00000AE0:             ; ;       R4 - pointer to the table with binary codes
+00000AE0:             ; 
+00000AE0: E92D4070    ; interptetKey    PUSH    {R4-R6, LR}
+00000AE4: E28F4F5A    ;                                 ADR     R4, binaryValues                ; load the unique code 
+                      ; for the key in R0
+00000AE8: E7D40000    ;                                 LDRB    R0, [R4, R0]                    
+00000AEC: E350000A    ;                                 CMP     R0, #maxDigit                   ; check if the key pres
+                      ; sed was a digit or 
+00000AF0: BB00002D    ;                                 BLLT    updateDecimal                   ; arithmetic operator a
+                      ; nd run the appropriate
+00000AF4: AB000039    ;                                 BLGE    changeTotal                     
+00000AF8:             ;                                                         
+00000AF8: E8BD4070    ;                                 POP     {R4-R6, LR}
+00000AFC: E1A0F00E    ;                                 MOV     PC, LR
+00000B00:             ; 
+00000B00:             ; 
+00000B00:             ; 
+00000B00:             ; ;-----------------------------------------SHOW TOTAL--------------------------------------
+00000B00:             ; ; Display the total value calculated
+00000B00:             ; ; Local registers:
+00000B00:             ; ;       R4 - pointer to the total memory location that holds the value after arithmetic operati
+                      ; ons
+00000B00:             ; 
+00000B00: E92D4010    ; showTotal               PUSH    {R4, LR}
+00000B04: E3A00001    ;                                 MOV     R0, #PRINT_CHAR                 ; move cursor down one 
+                      ; line to print the result
+00000B08: E3A010C0    ;                                 MOV     R1, #LFdata                     ; there
+00000B0C: E3A02020    ;                                 MOV     R2, #LCDCommand 
+00000B10: EF000001    ;                                 SVC     1
+00000B14:             ; 
+00000B14: E28F4F53    ;                                 ADR     R4, total                               ; load the tota
+                      ; l value, convert it to Binary Coded
+00000B18: E5140000    ;                                 LDR     R0, [R4]                                ; Decimal and p
+                      ; rint it
+00000B1C: EBFFFDE7    ;                                 BL              bcd_convert
+00000B20: EBFFFE99    ;                                 BL              printBCD
+00000B24: E3A00001    ;                                 MOV     R0, #PRINT_CHAR                 ; move cursor back to t
+                      ; op left position
+00000B28: E3A01080    ;                                 MOV     R1, #HOMEdata
+00000B2C: E3A02020    ;                                 MOV     R2, #LCDCommand 
+00000B30: EF000001    ;                                 SVC     1
+00000B34: E8BD4010    ;                                 POP     {R4, LR}
+00000B38: E1A0F00E    ;                                 MOV     PC, LR          
+00000B3C:             ; 
+00000B3C:             ; 
+00000B3C:             ; 
+00000B3C:             ; ;-----------------------------------------CLEAR TOTAL-------------------------------------
+00000B3C:             ; ; Reset calculator by clearing both total and currentDecimal memory locations. Also clears the
+00000B3C:             ; ; screen and moves cursor home.
+00000B3C:             ; ; Local registers:
+00000B3C:             ; ;       R4 - pointer to the total memory location that holds the value after arithmetic operati
+                      ; ons
+00000B3C:             ; ;       R5 - pointer to the currentDecimal that holds the current number to be added/subtracted
+00000B3C:             ; 
+00000B3C: E92D4030    ; clearTotal              PUSH    {R4-R5, LR}
+00000B40:             ; 
+00000B40: E3A00001    ;                                 MOV     R0, #PRINT_CHAR                 ; clear screen and move
+                      ;  cursor home
+00000B44: E3A01001    ;                                 MOV     R1, #FFdata
+00000B48: E3A02020    ;                                 MOV     R2, #LCDCommand 
+00000B4C: EF000001    ;                                 SVC     1
+00000B50:             ; 
+00000B50: E28F4E11    ;                                 ADR     R4, total                               ; zero the tota
+                      ; l and currentDecimal memory locations
+00000B54: E3A05000    ;                                 MOV     R5, #0
+00000B58: E5045000    ;                                 STR     R5, [R4]
+00000B5C: E28F4F42    ;                                 ADR     R4, currentDecimal
+00000B60: E5045000    ;                                 STR     R5, [R4]
+00000B64: EBFFFFE5    ;                                 BL              showTotal
+00000B68: E3A00064    ;                                 MOV     R0, #beepCalcTime                       ; notify that a
+                      ;  clear button is pressed with a beep
+00000B6C: EBFFFFA8    ;                                 BL              beep
+00000B70:             ; 
+00000B70: E8BD4030    ;                                 POP     {R4-R5, LR}
+00000B74: E1A0F00E    ;                                 MOV     PC, LR          
+00000B78:             ; 
+00000B78:             ; 
+00000B78:             ; 
+00000B78:             ; ;---------------------------------------SHOW OPERATION------------------------------------
+00000B78:             ; ; Show the last arithmetic operation performed
+00000B78:             ; ; Arguments:
+00000B78:             ; ;       R0 - operation performed (its binary code)
+00000B78:             ; ; Local registers:
+00000B78:             ; ;       R4 - temporarily holds the argument in R0
+00000B78:             ; ;       R5 - pointer to the table with ASCII representations of different keys
+00000B78:             ; 
+00000B78: E92D4030    ; showOp                  PUSH    {R4-R5, LR}
+00000B7C: E1A04000    ;                                 MOV     R4, R0
+00000B80: E3A00001    ;                                 MOV     R0, #PRINT_CHAR                 ; move the cursor to th
+                      ; e bottom right position
+00000B84: E3A010CF    ;                                 MOV     R1, #ENDdata
+00000B88: E3A02020    ;                                 MOV     R2, #LCDCommand 
+00000B8C: EF000001    ;                                 SVC     1
+00000B90:             ; 
+00000B90: E28F50A8    ;                                 ADR     R5, keyASCIICodes               ; load the ASCII repres
+                      ; entation of the operation                               
+00000B94: E7D51004    ;                                 LDRB    R1, [R5, R4]                    ; performed and print i
+                      ; t
+00000B98: E3A00001    ;                                 MOV     R0, #PRINT_CHAR                 
+00000B9C: E3A02022    ;                                 MOV     R2, #ctrlWriteChar
+00000BA0: EF000001    ;                                 SVC     1               
+00000BA4:             ;                         
+00000BA4: E8BD4030    ;                                 POP     {R4-R5, LR}
+00000BA8: E1A0F00E    ;                                 MOV     PC, LR
+00000BAC:             ; 
+00000BAC:             ; 
+00000BAC:             ; 
+00000BAC:             ; ;------------------------------------UPDATE CURRENT NUMBER---------------------------------
+00000BAC:             ; ; Using the digit in R0 (in binary), update the value in currentDecimal and print the new digit
+00000BAC:             ; ; Arguments:
+00000BAC:             ; ;       R0 - binary representation of the digit to append
+00000BAC:             ; ; Local registers:
+00000BAC:             ; ;       R4 - pointer to the currentDecimal that holds the current number to be changed
+00000BAC:             ; ;                also, pointer to table with ASCII values of buttons
+00000BAC:             ; ;       R5 - value in currentDecimal
+00000BAC:             ; ;       R6 - multiplier, appending digit means multiplying existing value by 10 and adding the 
+                      ; digit
+00000BAC:             ;         
+00000BAC: E92D4070    ; updateDecimal   PUSH    {R4-R6, LR}
+00000BB0: E28F40B4    ;                                 ADR     R4, currentDecimal              ; load the current numb
+                      ; er to be added/subtracted
+00000BB4: E5145000    ;                                 LDR     R5, [R4]
+00000BB8: E3A0600A    ;                                 MOV     R6, #10                                 ; append the ne
+                      ; w digit using multiplication and 
+00000BBC: E0250695    ;                                 MLA     R5, R5, R6, R0                  ; addition
+00000BC0: E5045000    ;                                 STR     R5, [R4] 
+00000BC4:             ; 
+00000BC4: E28F4074    ;                                 ADR     R4, keyASCIICodes               ; load the pointer to t
+                      ; he table with ASCII codes
+00000BC8: E7D41000    ;                                 LDRB    R1, [R4, R0]                    ; print the new digit
+00000BCC: E3A00001    ;                                 MOV     R0, #PRINT_CHAR                 
+00000BD0: E3A02022    ;                                 MOV     R2, #ctrlWriteChar
+00000BD4: EF000001    ;                                 SVC     1
+00000BD8: E8BD4070    ;                                 POP     {R4-R6, LR}
+00000BDC: E1A0F00E    ;                                 MOV     PC, LR
+00000BE0:             ; 
+00000BE0:             ; 
+00000BE0:             ; 
+00000BE0:             ; ;----------------------------------------CHANGE TOTAL------------------------------------
+00000BE0:             ; ; Using the binary code in R0, run the appropriate arithmetic operation. Then display the symbo
+                      ; l
+00000BE0:             ; ; of the operation performed as well as the updated total
+00000BE0:             ; ; Arguments:
+00000BE0:             ; ;       R0 - arithmetic operation to perform
+00000BE0:             ; ; Local registers:
+00000BE0:             ; ;       R4 - pointer to currentDecimal memory location
+00000BE0:             ; ;       R5 - pointer to total memory location
+00000BE0:             ; ;       R6 - temporarily holds the argument in R0
+00000BE0:             ; ;       R7 - index to the arithmeticOps table where airthmetic op handlers are stored (their po
+                      ; inters)
+00000BE0:             ; ;       R8 - pointer to the arithmeticOps table
+00000BE0:             ; 
+00000BE0: E92D41F0    ; changeTotal     PUSH    {R4-R8, LR}                     ; load the current decimal and total va
+                      ; lues
+00000BE4: E1A06000    ;                                 MOV     R6, R0 
+00000BE8: E28F407C    ;                                 ADR     R4, currentDecimal
+00000BEC: E28F5074    ;                                 ADR     R5, total
+00000BF0: E5141000    ;                                 LDR     R1, [R4]
+00000BF4: E5150000    ;                                 LDR     R0, [R5]
+00000BF8:             ; 
+00000BF8: E246700A    ;                                 SUB     R7, R6, #maxDigit               ; calculate the index a
+                      ; nd then run the corresponding
+00000BFC: E28F806C    ;                                 ADR     R8, arithmeticOps               ; method from arithmeti
+                      ; cOps table
+00000C00: E1A0E00F    ;                                 MOV     LR, PC
+00000C04: E798F107    ;                                 LDR     PC, [R8, R7, LSL #2]
+00000C08:             ; 
+00000C08: E5050000    ; finishOp                STR     R0, [R5]                                ; clear currentDecimal 
+                      ; and update total memory
+00000C0C: E3A07000    ;                                 MOV     R7, #0                                  ; location
+00000C10: E5047000    ;                                 STR     R7, [R4]                
+00000C14: E3A00001    ;                                 MOV     R0, #PRINT_CHAR                 ; clear screen and move
+                      ;  cursor home
+00000C18: E3A01001    ;                                 MOV     R1, #FFdata
+00000C1C: E3A02020    ;                                 MOV     R2, #LCDCommand 
+00000C20: EF000001    ;                                 SVC     1
+00000C24:             ; 
+00000C24: E1A00006    ;                                 MOV     R0, R6                                  ; display the o
+                      ; peration performed (its sign) and the
+00000C28: EBFFFFD2    ;                                 BL              showOp                                  ; updat
+                      ; ed total
+00000C2C: EBFFFFB3    ;                                 BL              showTotal
+00000C30: E3A00064    ;                                 MOV     R0, #beepCalcTime                       ; notify that a
+                      ;  key pressed with a beep
+00000C34: EBFFFF76    ;                                 BL              beep
+00000C38:             ; 
+00000C38: E8BD41F0    ;                                 POP     {R4-R8, LR}
+00000C3C: E1A0F00E    ;                                 MOV     PC, LR          
+00000C40:             ;                                 
+00000C40:             ; 
+00000C40:             ; 
+00000C40:             ; ; ---------------------------------DEFINITIONS---------------------------------------   
+00000C40:             ; maxDigit                EQU     10                                              ; to differenti
+                      ; ate between a digit and arithmetic op
+00000C40:             ; beepCalcTime    EQU     100                                     ; beep time for arithmetic oper
+                      ; ation or 'Clear' key pressed
+00000C40:             ; 
+00000C40: 30 31 32 33 ; keyASCIICodes   DEFB    0x30, 0x31, 0x32, 0x33  ; ASCII values for each key on the keyboard ret
+                      ; urned by
+00000C44: 34 35 36 37 ;                                 DEFB    0x34, 0x35, 0x36, 0x37  ; getKey SVC call, can be used 
+                      ; directly by the user 
+00000C48: 38 39 2B 2D ;                                 DEFB    0x38, 0x39, 0x2B, 0x2D  ; program or remapped to print 
+                      ; other characters
+00000C4C: 2A 2F 25 5E ;                                 DEFB    0x2A, 0x2F, 0x25, 0x5E
+00000C50: 73 67 21 72 ;                                 DEFB    0x73, 0x67, 0x21, 0x72
+00000C54:             ;                                 ALIGN
+00000C54:             ; 
+00000C54: 01 02 03 04 ; binaryValues    DEFB    0x1, 0x2, 0x3, 0x4      ; binary values associated with each key on the
+                      ;  keyboard
+00000C58: 05 06 07 08 ;                                 DEFB    0x5, 0x6, 0x7, 0x8              ; I use this table so t
+                      ; hat '*' and '#' get seperated from
+00000C5C: 09 0A 00 0B ;                                 DEFB    0x9, 0xA, 0x0, 0xB              ; the '0' on the keyboa
+                      ; rd, as the earlier are commands
+00000C60: 0C 0D 0E 0F ;                                 DEFB    0xC, 0xD, 0xE, 0xF              ; and their codes will 
+                      ; be used as indexes to arithmeticOps
+00000C64: 10 11 12 13 ;                                 DEFB    0x10, 0x11, 0x12, 0x13
+00000C68:             ;                                 ALIGN
+00000C68:             ; 
+00000C68: 00000000    ; total                   DEFW    0                                               ; total value a
+                      ; fter all arithmetic operations
+00000C6C: 00000000    ; currentDecimal  DEFW    0                                               ; number that is curren
+                      ; tly being input
+00000C70:             ; 
+00000C70:             ; 
+00000C70:             ; noOfArithmOps   EQU     10                                              ; arithmetic operations
+                      ;  implemented
+00000C70: 0000074C    ; arithmeticOps   DEFW    plus    
+00000C74: 00000754    ;                                 DEFW    minus           
+00000C78: 0000075C    ;                                 DEFW    multiply 
+00000C7C: 00000794    ;                                 DEFW    divide
+00000C80: 000007A0    ;                                 DEFW    modulo  
+00000C84: 000007B0    ;                                 DEFW    power
+00000C88: 000007DC    ;                                 DEFW    squareRoot
+00000C8C: 0000082C    ;                                 DEFW    gcd
+00000C90: 00000840    ;                                 DEFW    factorial
+00000C94: 00000860    ;                                 DEFW    rand
+00000C98:             ;                                 
+00000C98:             ;                                 
+00000C98:             ; 
+00000C98:             ; INCLUDE                 PWMtest.s                                               ; User program 
+                      ; - pulse-width modulation tester
+00000C98:             ; ;--------------------------------------------------------------------------------------
+00000C98:             ; ; Pulse-Width-Modulation tester program
+00000C98:             ; ; Krzysztof Koch
+00000C98:             ; ; 18th April 2016
+00000C98:             ; ;
+00000C98:             ; ; Last edit: 6th May 2016
+00000C98:             ; ; 
+00000C98:             ; ; User program to present Pulse-Width-Modulation on a given LED.
+00000C98:             ; ; 
+00000C98:             ; ; Instructions:
+00000C98:             ; ;       1. Change the LED to Pulse-Width-Modulate using the lower button on board
+00000C98:             ; ;       2. Using '*' and '#' buttons on the first keyboard incrent and decrement the on-cycle
+00000C98:             ; ;      of the LED
+00000C98:             ; ;
+00000C98:             ; ; Register use:
+00000C98:             ; ;       R4 - holds the last button pressed for comparison to detect when the button was release
+                      ; d
+00000C98:             ; ;       R5 - index of LED to perform PWM on
+00000C98:             ; ; (Tab size - 4)
+00000C98:             ; ;--------------------------------------------------------------------------------------
+00000C98:             ; 
+00000C98:             ; 
+00000C98:             ; ; ===================================PWM TESTER FSM====================================
+00000C98: E3A05000    ; pwmTest                 MOV     R5, #GreenLeft                  ; Pick the initial LED to PWM o
+                      ; n
+00000C9C: EB000024    ;                                 BL              pwmOutput                               ; print
+                      ;  the info message about the current on-cycle
+00000CA0:             ; 
+00000CA0:             ; 
+00000CA0:             ; ; ----------------------------------TEST IF KEY PRESSED--------------------------------
+00000CA0: E3A00004    ; pwmKeyTest              MOV     R0, #READ_KEYBOARD              ; poll the keyboard            
+                      ;                                                                         
+00000CA4: EF000004    ;                                 SVC     4
+00000CA8: E3500018    ;                                 CMP     R0, #keyNoTotal                 ; if no key pressed jum
+                      ; p to buttons polling
+00000CAC: AA000007    ;                                 BGE     pwmButtonTest
+00000CB0: E1A04000    ;                                 MOV             R4, R0                                  ; other
+                      ; wise, store the character in R4
+00000CB4:             ; 
+00000CB4:             ; 
+00000CB4:             ; ; --------------------------------WAITING FOR KEY RELEASE------------------------------
+00000CB4: E3A00004    ; notReleasedKey  MOV     R0, #READ_KEYBOARD              ; keep checking if the same key is stil
+                      ; l pressed
+00000CB8: EF000004    ;                                 SVC     4                                               
+00000CBC: E1500004    ;                                 CMP             R0, R4                                  
+00000CC0: 0AFFFFFB    ;                                 BEQ     notReleasedKey                  
+00000CC4:             ;                                 
+00000CC4:             ; 
+00000CC4:             ; ; -----------------------------------INTERPTET THE KEY---------------------------------
+00000CC4: E1A00004    ;                                 MOV     R0, R4                                  ; run the metho
+                      ; d that analyses the key pressed
+00000CC8: EB000013    ;                                 BL              processKey                              ; inter
+                      ; pret the key pressed
+00000CCC: EB000018    ;                                 BL              pwmOutput                               ; print
+                      ;  the info message about the new on-cycle
+00000CD0:             ; 
+00000CD0:             ; 
+00000CD0:             ; ; ---------------------------------TEST IF BUTTON PRESSED------------------------------
+00000CD0: E3A00003    ; pwmButtonTest   MOV     R0, #READ_BUTTONS               ; poll the on-board buttons
+00000CD4: EF000003    ;                                 SVC     3
+00000CD8: E3500000    ;                                 CMP     R0, #0
+00000CDC: 0A00000B    ;                                 BEQ     modulate                                ; if no button 
+                      ; pressed, perform PWM
+00000CE0: E1A04000    ;                                 MOV     R4, R0
+00000CE4:             ; 
+00000CE4:             ; 
+00000CE4:             ; ; --------------------------------WAITING FOR BUTTON RELEASE---------------------------
+00000CE4: E3A00003    ; notReleasedBtn  MOV     R0, #READ_BUTTONS               ; keep checking if the same button is s
+                      ; till pressed
+00000CE8: EF000003    ;                                 SVC     3                                               
+00000CEC: E1500004    ;                                 CMP             R0, R4                                  
+00000CF0: 0AFFFFFB    ;                                 BEQ     notReleasedBtn
+00000CF4:             ; 
+00000CF4:             ; 
+00000CF4:             ; ; -------------------------------INTERPRET THE BUTTON PRESSED--------------------------
+00000CF4: E3140001    ;                                 TST     R4, #upPressed                  ; if upper button press
+                      ; ed then close the program
+00000CF8: 13A00000    ;                                 MOVNE   R0, #EXIT                               
+00000CFC: 1F000000    ;                                 SVCNE   0
+00000D00: E3140002    ;                                 TST     R4, #lowPressed                 ; If lower then change 
+                      ; the LED to PWM on
+00000D04: 11A00005    ;                                 MOVNE   R0, R5          
+00000D08: EBFFFF31    ;                                 BL              changeLED
+00000D0C: E1A05000    ;                                 MOV     R5, R0
+00000D10:             ; 
+00000D10:             ; ; ---------------------------------DO PULSE-WIDTH MODULATION---------------------------
+00000D10: E1A00005    ; modulate                MOV     R0, R5
+00000D14: EBFFFF0C    ;                                 BL              pwmLED
+00000D18: EAFFFFE0    ;                                 B               pwmKeyTest
+00000D1C:             ; 
+00000D1C:             ; ; =====================================================================================
+00000D1C:             ;                                 
+00000D1C:             ; 
+00000D1C:             ; 
+00000D1C:             ; ; ------------------------------PROCESS KEY PRESSED-----------------------------------
+00000D1C:             ; ; Run the appropriate handler method according to the key pressed. Increment or decrement
+00000D1C:             ; ; pulse width
+00000D1C:             ; ; Arguments
+00000D1C:             ; ;       R0 - index of they key pressed 
+00000D1C:             ; 
+00000D1C: E92D4000    ; processKey              PUSH    {LR}
+00000D20: E3500009    ;                                 CMP     R0, #decrPulseKey
+00000D24: 0BFFFF22    ;                                 BLEQ    decrPulseWidth
+00000D28: E350000B    ;                                 CMP     R0, #incrPulseKey
+00000D2C: 0BFFFF18    ;                                 BLEQ    incrPulseWidth
+00000D30: E8BD8000    ;                                 POP     {PC}
+00000D34:             ;                                 
+00000D34:             ; 
+00000D34:             ; 
+00000D34:             ; ; ---------------------------DISPLAY OUTPUT TO THE USER------------------------------
+00000D34:             ; ; Display output to the user on the LCD screen.
+00000D34:             ;                                 
+00000D34: E92D4000    ; pwmOutput               PUSH    {LR}
+00000D38: E3A00007    ;                                 MOV     R0, #LED_STORE                  ; store the LED state, 
+                      ; because of legacy code I didn't
+00000D3C: EF000007    ;                                 SVC     7                                               ; chang
+                      ; e the #PRINT_CHAR SVC call that clears the LCDs state. 
+00000D40: E28F004C    ;                                 ADR     R0, pwmMessage                  ; This time I want to r
+                      ; epeatedly use LEDs and LCD in turn so 
+00000D44: EBFFFE1C    ;                                 BL              printString                     ; I want to pre
+                      ; serve LEDs state. Print the message to the user
+00000D48: EB000006    ;                                 BL              printPWM                                ; print
+                      ;  the Pulse width
+00000D4C: E3A00001    ;                                 MOV     R0, #PRINT_CHAR                 ; Append the '%' at the
+                      ;  end 
+00000D50: E3A01025    ;                                 MOV     R1, #percentASCII
+00000D54: E3A02022    ;                                 MOV     R2, #ctrlWriteChar
+00000D58: EF000001    ;                                 SVC     1
+00000D5C: E3A00008    ;                                 MOV     R0, #LED_LOAD                   ; restore the LCD state
+00000D60: EF000008    ;                                 SVC     8
+00000D64: E8BD8000    ;                                 POP     {PC} 
+00000D68:             ; 
+00000D68:             ; 
+00000D68:             ; 
+00000D68:             ; ; -------------------------------PRINT PWM VALUE--------------------------------------
+00000D68:             ; ; Print the On-Cycle value. Print the percentage of time the LED is on during the period
+00000D68:             ; ; Local registers:
+00000D68:             ; ;       R4 - pointer to the pulseWidth memory location
+00000D68:             ; ;       R5 - multplier by 100
+00000D68:             ; 
+00000D68: E92D4030    ; printPWM                PUSH    {R4-R5, LR}
+00000D6C: E24F4E39    ;                                 ADR     R4, pulseWidth                  ; load the pulseWidth v
+                      ; alue
+00000D70: E5144000    ;                                 LDR     R4, [R4]
+00000D74: E3A05064    ;                                 MOV     R5, #100                                ; multiply it b
+                      ; y 100 and then devide by period
+00000D78: E0000594    ;                                 MUL     R0, R4, R5                              ; to get the pe
+                      ; rcentage 
+00000D7C: E3A01014    ;                                 MOV     R1, #period
+00000D80: EBFFFE83    ;                                 BL              divide     
+00000D84: EBFFFD4D    ;                                 BL              bcd_convert                             ; conve
+                      ; r the percentage to BCD and print it
+00000D88: EBFFFDFF    ;                                 BL              printBCD
+00000D8C:             ;                                 
+00000D8C: E8BD4030    ;                                 POP     {R4-R5, LR}
+00000D90: E1A0F00E    ;                                 MOV     PC, LR
+00000D94:             ; 
+00000D94:             ; 
+00000D94:             ; ; ---------------------------------DEFINITIONS--------------------------------------
+00000D94:             ; decrPulseKey    EQU     9                                               ; index of the '*' key 
+                      ; - decrement pulse width
+00000D94:             ; incrPulseKey    EQU     11                                              ; index of the '#' key 
+                      ; - increment pulse width
+00000D94:             ; percentASCII    EQU     0x25                                    ; ASCII code for '%'
+00000D94:             ; 
+00000D94: 01 50 75 6C ; pwmMessage              DEFB    FF, "Pulse width:", LF, NULL ; Message that keeps being printed
+00000D98: 73 65 20 77 ;  all time this 
+00000D9C: 69 64 74 68 ; 
+00000DA0: 3A 02 00    ; 
+00000DA4:             ;                                 ALIGN                                                   ; app i
+                      ; s running
+00000DA4:             ; 
+00000DA4:             ; 
+
+Symbol Table: Labels
+: superStack                        000000A0  Local -- ARM
+: irqStack                          00000120  Local -- ARM
+: userStack                         000001A0  Local -- ARM
+: SVCtable                          000001A0  Local -- ARM
+: pcb                               000001C8  Local -- ARM
+: reset                             000001D0  Local -- ARM
+: terminate                         000001E0  Local -- ARM
+: switchProgram                     000001E4  Local -- ARM
+: supervisor                        00000230  Local -- ARM
+: interrupt                         00000244  Local -- ARM
+: timerIRQ                          00000260  Local -- ARM
+: IRQsSetup                         00000284  Local -- ARM
+: IOspace                           10000000  Value
+: IRQsAdr                           00000018  Value
+: IRQEnablesAdr                     0000001C  Value
+: FPGAspace                         20000000  Value
+: userMode                          00000010  Value
+: SVCMode                           00000013  Value
+: IRQMode                           00000012  Value
+: clearMode                         0000001F  Value
+: activeIRQs                        00000001  Value
+: enableIRQinCPU                    00000080  Value
+: timerIRQVec                       00000001  Value
+: EXIT                              00000000  Value
+: PRINT_CHAR                        00000001  Value
+: TIME                              00000002  Value
+: READ_BUTTONS                      00000003  Value
+: READ_KEYBOARD                     00000004  Value
+: RAND                              00000005  Value
+: LED_WRITE                         00000006  Value
+: LED_STORE                         00000007  Value
+: LED_LOAD                          00000008  Value
+: BUZZER_WRITE                      00000009  Value
+: MaxSVC                            0000000A  Value
+: noOfUsrPrograms                   00000002  Value
+: programRunning                    000002BC  Local -- ARM
+: switchBeepLen                     00000028  Value
+: switchBeepNo                      00000004  Value
+: bcd_convert                       000002C0  Local -- ARM
+: bcd_loop                          000002CC  Local -- ARM
+: bcd_out                           000002E8  Local -- ARM
+: dec_table                         000002F4  Local -- ARM
+: bcdDivide                         0000031C  Local -- ARM
+: bcdDivide1                        00000328  Local -- ARM
+: bitsInDivision                    00000020  Value
+: keyboardSetup                     00000348  Local -- ARM
+: scanAllKeys                       00000370  Local -- ARM
+: scanKeyboard                      000003A4  Local -- ARM
+: nextRow                           000003B4  Local -- ARM
+: scanButton                        000003E0  Local -- ARM
+: updateKeys                        00000404  Local -- ARM
+: nextKey                           00000418  Local -- ARM
+: finishUpdate                      00000440  Local -- ARM
+: keyboardPOLL                      00000448  Local -- ARM
+: nextKeyPOLL                       00000458  Local -- ARM
+: keyPressedFound                   00000470  Local -- ARM
+: buttonsPOLL                       00000484  Local -- ARM
+: buttonFound                       000004B0  Local -- ARM
+: keypad1DataAdr                    00000002  Value
+: keypad1CtrlAdr                    00000003  Value
+: keypad2DataAdr                    0000000E  Value
+: keypad2CtrlAdr                    0000000F  Value
+: buttonsAdr                        00000004  Value
+: pinDirKeyboard                    0000001F  Value
+: totalButtonNo                     0000001A  Value
+: keyboardKeyNo                     0000000C  Value
+: keyNoTotal                        00000018  Value
+: noOfRows                          00000003  Value
+: scanRow                           0000000F  Value
+: noScan                            00000000  Value
+: lowButtonTst                      00000080  Value
+: upButtonTst                       00000040  Value
+: testPressedDeb                    000000FF  Value
+: lowButtonAdr                      00000018  Value
+: upButtonAdr                       00000019  Value
+: lowPressed                        00000002  Value
+: upPressed                         00000001  Value
+: pressed                           00000001  Value
+: notPressed                        00000000  Value
+: rowScanBitmasks                   000004C4  Local -- ARM
+: keyAdrOffsets                     000004C8  Local -- ARM
+: keyStates                         000004E4  Local -- ARM
+: LCDSetup                          00000500  Local -- ARM
+: nextLCDCommand                    0000050C  Local -- ARM
+: printChar                         00000530  Local -- ARM
+: notReady                          00000548  Local -- ARM
+: finishPrint                       0000057C  Local -- ARM
+: printBCD                          0000058C  Local -- ARM
+: nextBCD                           0000059C  Local -- ARM
+: printString                       000005BC  Local -- ARM
+: nextChar                          000005C4  Local -- ARM
+: printHex                          000005F4  Local -- ARM
+: dataReg                           00000000  Value
+: ctrlReg                           00000004  Value
+: readyCtlr                         00000024  Value
+: isReady                           00000080  Value
+: enableBus                         00000001  Value
+: disableBus                        000000FE  Value
+: LCDCommand                        00000020  Value
+: ctrlWriteChar                     00000022  Value
+: NULL                              00000000  Value
+: FF                                00000001  Value
+: FFdata                            00000001  Value
+: LF                                00000002  Value
+: LFdata                            000000C0  Value
+: END                               00000003  Value
+: ENDdata                           000000CF  Value
+: HOME                              00000004  Value
+: HOMEdata                          00000080  Value
+: BACK                              00000005  Value
+: FORW                              00000006  Value
+: noOfCmdsImpl                      00000007  Value
+: LCDCmdsCodes                      00000614  Local -- ARM
+: noOfSetupCmds                     00000002  Value
+: setUpCommands                     0000061C  Local -- ARM
+: maskOtherDigits                   0000000F  Value
+: ASCIIoffset                       00000030  Value
+: bcdCount                          00000008  Value
+: bcdShifts                         00000620  Local -- ARM
+: timestampPOLL                     00000628  Local -- ARM
+: timestamp                         0000064C  Local -- ARM
+: wait                              0000068C  Local -- ARM
+: notYet                            000006B4  Local -- ARM
+: timeHardwareAdr                   00000008  Value
+: timerCompAdr                      0000000C  Value
+: maxTimerVal                       00000100  Value
+: timestampAdr                      000006D0  Local -- ARM
+: generateRandom                    000006D8  Local -- ARM
+: nextTerm                          000006F8  Local -- ARM
+: getRandom                         0000072C  Local -- ARM
+: lfsr                              00000744  Local -- ARM
+: termsInPoly                       00000004  Value
+: polynomial                        00000748  Local -- ARM
+: plus                              0000074C  Local -- ARM
+: minus                             00000754  Local -- ARM
+: multiply                          0000075C  Local -- ARM
+: divAndMod                         00000764  Local -- ARM
+: divisionLoop                      00000774  Local -- ARM
+: divide                            00000794  Local -- ARM
+: modulo                            000007A0  Local -- ARM
+: power                             000007B0  Local -- ARM
+: powerLoop                         000007C8  Local -- ARM
+: squareRoot                        000007DC  Local -- ARM
+: shiftAgain                        000007EC  Local -- ARM
+: rootLoop                          000007F8  Local -- ARM
+: rootFound                         00000820  Local -- ARM
+: gcd                               0000082C  Local -- ARM
+: factorial                         00000840  Local -- ARM
+: factorialLoop                     00000850  Local -- ARM
+: rand                              00000860  Local -- ARM
+: reduceNumber                      0000086C  Local -- ARM
+: setupLEDs                         00000878  Local -- ARM
+: storeLEDs                         0000089C  Local -- ARM
+: restoreLEDs                       000008D4  Local -- ARM
+: switchLED                         0000090C  Local -- ARM
+: pwmLED                            0000094C  Local -- ARM
+: incrPulseWidth                    00000994  Local -- ARM
+: decrPulseWidth                    000009B4  Local -- ARM
+: changeLED                         000009D4  Local -- ARM
+: LEDaddress                        00000000  Value
+: LEDEnAddress                      00000004  Value
+: LEDEnable                         00000010  Value
+: numberOfLEDs                      00000008  Value
+: GreenLeft                         00000000  Value
+: AmberLeft                         00000001  Value
+: RedLeft                           00000002  Value
+: BlueLeft                          00000003  Value
+: GreenRight                        00000004  Value
+: AmberRight                        00000005  Value
+: RedRight                          00000006  Value
+: BlueRight                         00000007  Value
+: period                            00000014  Value
+: pulseWidth                        000009E4  Local -- ARM
+: LEDstate                          000009E8  Local -- ARM
+: LEDcontrol                        000009EC  Local -- ARM
+: buzzerWrite                       000009F0  Local -- ARM
+: beep                              00000A14  Local -- ARM
+: beepBeep                          00000A44  Local -- ARM
+: beepAgain                         00000A50  Local -- ARM
+: buzzerAdr                         00000000  Value
+: buzzerOn                          000000FF  Value
+: buzzerOff                         00000000  Value
+: calculator                        00000A70  Local -- ARM
+: checkKeyboard                     00000A74  Local -- ARM
+: stillPressedKey                   00000A88  Local -- ARM
+: checkButtons                      00000AA4  Local -- ARM
+: stillPressedBtn                   00000AB8  Local -- ARM
+: interptetKey                      00000AE0  Local -- ARM
+: showTotal                         00000B00  Local -- ARM
+: clearTotal                        00000B3C  Local -- ARM
+: showOp                            00000B78  Local -- ARM
+: updateDecimal                     00000BAC  Local -- ARM
+: changeTotal                       00000BE0  Local -- ARM
+: finishOp                          00000C08  Local -- ARM
+: maxDigit                          0000000A  Value
+: beepCalcTime                      00000064  Value
+: keyASCIICodes                     00000C40  Local -- ARM
+: binaryValues                      00000C54  Local -- ARM
+: total                             00000C68  Local -- ARM
+: currentDecimal                    00000C6C  Local -- ARM
+: noOfArithmOps                     0000000A  Value
+: arithmeticOps                     00000C70  Local -- ARM
+: pwmTest                           00000C98  Local -- ARM
+: pwmKeyTest                        00000CA0  Local -- ARM
+: notReleasedKey                    00000CB4  Local -- ARM
+: pwmButtonTest                     00000CD0  Local -- ARM
+: notReleasedBtn                    00000CE4  Local -- ARM
+: modulate                          00000D10  Local -- ARM
+: processKey                        00000D1C  Local -- ARM
+: pwmOutput                         00000D34  Local -- ARM
+: printPWM                          00000D68  Local -- ARM
+: decrPulseKey                      00000009  Value
+: incrPulseKey                      0000000B  Value
+: percentASCII                      00000025  Value
+: pwmMessage                        00000D94  Local -- ARM

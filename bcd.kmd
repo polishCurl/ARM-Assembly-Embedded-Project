@@ -1,0 +1,104 @@
+KMD
+00000000:             ; ;-----------------------------------------------------------------------------------
+00000000:             ; ; BCD - Binary Coded Decimal
+00000000:             ; ; Jim Garside 
+00000000:             ; ; 10th April 2016
+00000000:             ; ;
+00000000:             ; ; Last edit: 13th April 2016 (Krzysztof Koch)
+00000000:             ; ; 
+00000000:             ; ; Binary to Binary Coded Decimal conversion utility. Code by Jim Garside with minor changes
+00000000:             ; ; by Krzysztof Koch
+00000000:             ; ;
+00000000:             ; ; (Tab size - 4)
+00000000:             ; ;-----------------------------------------------------------------------------------
+00000000:             ; 
+00000000:             ; 
+00000000:             ; ;-------------------------------------CONVERT--------------------------------------
+00000000:             ; ; Convert unsigned binary value in R0 into BCD representation, returned in R0
+00000000:             ; ; Arguments:
+00000000:             ; ;       R0 - unsigned binary value
+00000000:             ; ; Returns:
+00000000:             ; ;       R0 - binary coded decimal representation of the argument
+00000000:             ; 
+00000000: E92D41F0    ; bcd_convert             PUSH    {R4-R8, LR}             
+00000004: E28F7028    ;                                 ADR             R7, dec_table           ; Point at conversion t
+                      ; able
+00000008: E3A08000    ;                                 MOV             R8, #0                          ; Zero accumula
+                      ; tor
+0000000C:             ; 
+0000000C: E4974004    ; bcd_loop                LDR             R4, [R7], #4            ; Get next divisor, step pointe
+                      ; r
+00000010: E3540001    ;                                 CMP             R4, #1                          ; Termination c
+                      ; ondition?
+00000014: 0A000003    ;                                 BEQ             bcd_out                         ;  yes
+00000018:             ; 
+00000018: EB00000F    ;                                 BL              bcdDivide                               ; R0 :=
+                      ;  R0/R4 (rem. R5)
+0000001C:             ; 
+0000001C: E0808208    ;                                 ADD             R8, R0, R8, LSL #4      ; Accumulate result
+00000020: E1A00005    ;                                 MOV             R0, R5                          ; Recycle remai
+                      ; nder
+00000024: EAFFFFF8    ;                                 B               bcd_loop                        ;
+00000028:             ; 
+00000028: E0800208    ; bcd_out                 ADD             R0, R0, R8, LSL #4      ; Accumulate result to output
+0000002C: E8BD41F0    ;                                 POP     {R4-R8, LR}                     
+00000030: E1A0F00E    ;                                 MOV             PC, LR                          ; Return
+00000034:             ; 
+00000034: 3B9ACA00    ; dec_table               DCD             1000000000, 100000000, 10000000, 1000000
+00000038: 05F5E100    ; 
+0000003C: 00989680    ; 
+00000040: 000F4240    ; 
+00000044: 000186A0    ;                                 DCD             100000, 10000, 1000, 100, 10, 1
+00000048: 00002710    ; 
+0000004C: 000003E8    ; 
+00000050: 00000064    ; 
+00000054: 0000000A    ; 
+00000058: 00000001    ; 
+0000005C:             ; 
+0000005C:             ; 
+0000005C:             ; 
+0000005C:             ; ;---------------------------32-BIT UNSIGNED DIVISION-------------------------------
+0000005C:             ; ; 32-bit unsigned integer division R0/R4. ; Returns quotient FFFFFFFF in case of division 
+0000005C:             ; ; by zero. Does not require a stack
+0000005C:             ; ; Arguments:
+0000005C:             ; ;       R0 - number to be divided
+0000005C:             ; ;       R4 - divident
+0000005C:             ; ; Returns:
+0000005C:             ; ;       R0 - quotient
+0000005C:             ; ;       R5 - remainder
+0000005C:             ; ; Local Registers:
+0000005C:             ; ;       R0 - corrupted (will be zero)
+0000005C:             ; 
+0000005C: E3A05000    ; bcdDivide               MOV             R5, #0                          ; AccH
+00000060: E3A06020    ;                                 MOV             R6, #bitsInDivision     ; Number of bits in div
+                      ; ision
+00000064: E0900000    ;                                 ADDS    R0, R0, R0                      ; Shift dividend
+00000068:             ; 
+00000068: E0A55005    ; bcdDivide1              ADC             R5, R5, R5                      ; Shift AccH, carry int
+                      ; o LSB
+0000006C: E1550004    ;                                 CMP             R5, R4                          ; Will it go?
+00000070: 20455004    ;                                 SUBHS   R5, R5, R4                      ; If so, subtract
+00000074: E0B00000    ;                                 ADCS    R0, R0, R0                      ; Shift dividend & Acc.
+                      ;  result
+00000078: E2466001    ;                                 SUB             R6, R6, #1                      ; Loop count
+0000007C: E1160006    ;                                 TST             R6, R6                          ; Leaves carry 
+                      ; alone
+00000080: 1AFFFFF8    ;                                 BNE             bcdDivide1                              ; Repea
+                      ; t as required
+00000084:             ; 
+00000084: E1A0F00E    ;                                 MOV             PC, LR                          ; Return 
+00000088:             ; 
+00000088:             ; 
+00000088:             ; 
+00000088:             ; ; ---------------------------------DEFINITIONS--------------------------------------    
+00000088:             ; bitsInDivision  EQU     32
+00000088:             ; 
+
+Symbol Table: Labels
+: bcd_convert                       00000000  Local -- ARM
+: bcd_loop                          0000000C  Local -- ARM
+: bcd_out                           00000028  Local -- ARM
+: dec_table                         00000034  Local -- ARM
+: bcdDivide                         0000005C  Local -- ARM
+: bcdDivide1                        00000068  Local -- ARM
+: bitsInDivision                    00000020  Value
